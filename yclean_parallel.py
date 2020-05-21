@@ -11,7 +11,7 @@ import numpy as np
 
 #### INFO DIRECTORIES & SUBROUTINES
 
-diryclean = os.path.expanduser('~/binary_project/yclean/final_scripts')
+#diryclean = os.path.expanduser('~/binary_project/yclean/final_scripts')
 execfile(os.path.join(diryclean, 'hacerMascara.py'))
 execfile(os.path.join(diryclean, 'secondMaxLocal.py'))
 execfile(os.path.join(diryclean, "checkExtremeChannels.py"))
@@ -74,7 +74,13 @@ rms=1.42602219*imstat(imagename+'.tc'+str(it)+'.image', chans=planes)['medabsdev
 #rms=4e-3
 
 
-xstat=imstat(imagename+'.tc'+str(it)+'.residual')
+for dummycounter in range(5):
+    try:
+        xstat = imstat(imagename+'.tc'+str(it)+'.residual')
+        casalog.post('Stats max: %r' % (xstat['max'],))
+        break
+    except TypeError:
+        casalog.post('Trying imstat again: %i' % dummycounter)
 limitLevelSNR=float(xstat['max']/rms*secondary_lobe_level)
 
 
@@ -141,7 +147,14 @@ while limitLevelSNR>1.5:
     ####
     #rms=4e-3
 
-    xstatnew=imstat(imagename+'.tc0.residual')
+    for dummycounter in range(5):
+        try:
+            xstatnew = imstat(imagename+'.tc0.residual')
+            casalog.post('New stats max: %r' % (xstatnew['max'],))
+            break
+        except TypeError:
+            casalog.post('Trying imstat again: %i' % dummycounter)
+
     if xstatnew['max']>xstat['max']:
         break
     else:
