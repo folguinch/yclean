@@ -69,7 +69,12 @@ print "Secondary Lobe PSF Level:" ,secondary_lobe_level
 ##### RMS calculated in a subset of channels
 planes=list((np.floor(np.array([2,3,4,5,6,7],dtype=float)/10*nchan)).astype(int))
 planes=';'.join(map(str,planes))
-rms=1.42602219*imstat(imagename+'.tc'+str(it)+'.image', chans=planes)['medabsdevmed'][0]
+for dummycounter in range(5):
+    try:
+        rms=1.42602219*imstat(imagename+'.tc'+str(it)+'.image', chans=planes)['medabsdevmed'][0]
+        break
+    except TypeError:
+        casalog.post('Trying imstat again: %i' % dummycounter)
 ####
 #rms=4e-3
 
@@ -101,49 +106,59 @@ while limitLevelSNR>1.5:
     print "Iter "+str(it)+": SNR of masklevel: -----"+str(masklevel/rms)
     
     # The masks are defined based on the previous image and residuals    
-    combineMask=[source+'MASCARA.tc'+str(it-2)+'.m'] if(it>1) else ''
-    hacerMascara(imageName=imagename+'.tc0',
-                 maskThreshold=masklevel,beamFractionReal=0.5, 
-                 outputMaskName=source+'MASCARA.tc'+str(it-1)+'.m',
-                 useResidual=True, combineMask=combineMask)
-   
-    os.system('rm -rf '+imagename+'.tc0.workdirectory/auto*.n*.mask')
+    outputMaskName = source+'MASCARA.tc'+str(it-1)+'.m'
+    if not os.path.isdir(outputMaskName):
+        combineMask=[source+'MASCARA.tc'+str(it-2)+'.m'] if(it>1) else ''
+        hacerMascara(imageName=imagename+'.tc0',
+                    maskThreshold=masklevel,beamFractionReal=0.5, 
+                    outputMaskName=outputMaskName,
+                    useResidual=True, combineMask=combineMask)
+    
+        os.system('rm -rf '+imagename+'.tc0.workdirectory/auto*.n*.mask')
 
 
-    tclean(vis = vis,
-           imagename = imagename+'.tc0',
-           field = source,
-           spw=spwline,
-           gridder = gridder,
-           #wprojplanes = wprojplanes, 
-           specmode = specmode,
-           outframe = outframe,
-           width = width, #
-           start = start,
-           nchan = nchan,
-           restfreq = restfreq, 
-           interpolation = interpolation,
-           interactive = interactive,
-           niter=100000,
-           imsize = imsize,
-           cell = cell,
-           weighting = weighting,
-           robust=robust, 
-           deconvolver = deconvolver, 
-           scales = scales,
-           phasecenter = phasecenter, 
-           threshold = threshold,
-           startmodel='',
-           #startmodel=imagename+'.tc'+str(it-1)+'.model',
-           mask=source+'MASCARA.tc'+str(it-1)+'.m',
-           uvtaper=uvtaper,
-           pblimit=pblimit,
-           parallel=True)
+        tclean(vis = vis,
+            imagename = imagename+'.tc0',
+            field = source,
+            spw=spwline,
+            gridder = gridder,
+            #wprojplanes = wprojplanes, 
+            specmode = specmode,
+            outframe = outframe,
+            width = width, #
+            start = start,
+            nchan = nchan,
+            restfreq = restfreq, 
+            interpolation = interpolation,
+            interactive = interactive,
+            niter=100000,
+            imsize = imsize,
+            cell = cell,
+            weighting = weighting,
+            robust=robust, 
+            deconvolver = deconvolver, 
+            scales = scales,
+            phasecenter = phasecenter, 
+            threshold = threshold,
+            startmodel='',
+            #startmodel=imagename+'.tc'+str(it-1)+'.model',
+            mask=source+'MASCARA.tc'+str(it-1)+'.m',
+            uvtaper=uvtaper,
+            pblimit=pblimit,
+            parallel=True)
+    else:
+        casalog.post('Skipping mask %s' % outputMaskName)
     
     ##### RMS calculated in a subset of channels
     planes=list((np.floor(np.array([2,3,4,5,6,7,8],dtype=float)/10*nchan)).astype(int))
     planes=';'.join(map(str,planes))
-    rms=1.42602219*imstat(imagename+'.tc0.image', chans=planes)['medabsdevmed'][0]
+    for dummycounter in range(5):
+        try:
+            rms = 1.42602219 * imstat(imagename+'.tc0.image',
+                    chans=planes)['medabsdevmed'][0]
+            break
+        except TypeError:
+            casalog.post('Trying imstat again: %i' % dummycounter)
     ####
     #rms=4e-3
 
