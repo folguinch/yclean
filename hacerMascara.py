@@ -117,17 +117,19 @@ def hacerMascara(imageName, maskThreshold, outputMaskName, beamFractionReal=1, c
             casalog.post("Labeled mask: " + str(j) + " pieces")
             for canal in range(nChannels):
                 #if (canal%20==0):
-                casalog.post("Channel # " + str(canal))
+                #casalog.post("Channel # " + str(canal))
                 counts = Counter(np.ndarray.flatten(labeled[:,:,canal]).tolist())
                 labelsInChannel = counts.keys()
                 del labelsInChannel[0]
                 #print set(labelsInChannel)
-                casalog.post('Possible issue: %r' %
-                        (set(labelsInChannel)<=labelStack,))
+                #casalog.post('Possible issue: %r' %
+                #        (set(labelsInChannel)<=labelStack,))
                 if set(labelsInChannel) <= labelStack:
                     labelStack = labelStack - set(labelsInChannel)
                 else:
                     raise Exception("Error in labeling") 
+
+                # Remove small connected components
                 sumapixels = np.bincount(labeled[:,:,canal].flatten())
                 sumapixels = sumapixels[labeled[:,:,canal]]
                 sizelimit = beamarea[canal]*beamFractionReal
