@@ -109,8 +109,25 @@ def hacerMascara(imageName, maskThreshold, outputMaskName, beamFractionReal=1, c
                            # or (spatial x spatial x frequency/velocity x pol)
         if nChannels > 1: # In case of multiple beams
             polAxisPosition = np.where(header['axisnames']=='Stokes')[0][0]
-            mask = np.squeeze(mask) # remove extra redundant dimension (polarization?) 
-            casalog.post('ShapeMASK %r' % (np.shape(mask),))
+            for dummy in range(3):
+                mask = np.squeeze(mask) # remove extra redundant dimension (polarization?) 
+                casalog.post('ShapeMASK %r' % (np.shape(mask),))
+                if len(np.shape(mask))==1 and dummy<=1:
+                    casalog.post('Error in immath, trying again')
+                    os.system('rm -r ' + mm)
+                    if(useResidual):
+                        immath(imagename = [imageName+'.residual'],outfile = mm,expr = 'iif(IM0 > '+str(maskThreshold) +',1.0,0.0)', mask=myflux+'>0.2')
+                    else:
+                        immath(imagename = [myimage],outfile = mm,expr = 'iif(IM0 > '+str(maskThreshold) +',1.0,0.0)', mask=myflux+'>0.2')
+                    #immath(imagename = [mm],outfile = mm,expr = 'iif(IM0 > '+str(thresh) +',1.0,0.0)', mask=myflux+'>0.2') # clean vs tclean
+                    
+                    casalog.post('Created maskThreshold mask')
+                elif len(np.shape(mask))==1 and dummy==2:
+                    casalog.post('Error in immath, select a smaller image')
+                    raise Exception
+                else:
+                    continue
+
             # separate and label connected components
             labeled, j = scipy.ndimage.label(mask, structure=neighborStructure) 
             labelStack = set(range(1,j+1))
