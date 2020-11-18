@@ -1,10 +1,17 @@
-import scipy.ndimage
+import os
 import sys
-import numpy as np
-from collections import Counter
 import time
+from collections import Counter
 
-def hacerMascara(imageName, maskThreshold, outputMaskName, beamFractionReal=1, combineMask='',useResidual=True,):
+from casatasks import casalog, imhead
+from spectral_cube import SpectralCube
+from spectral_cube.io.casa_masks import make_casa_mask
+import numpy as np
+import scipy.ndimage
+
+def hacerMascara(imageName: str, maskThreshold: float, outputMaskName: 'Path', 
+        beamFractionReal: float = 1, combineMask: list = '', 
+        useResidual: bool = True):
     """hacerMascara(imageName, maskThreshold, n, outputMaskName): Takes image
     "imageName.residual" if useResidual=True --- which is the
     default. Otherwise, it takes "imageName.image". It calculates a mask
@@ -33,17 +40,17 @@ def hacerMascara(imageName, maskThreshold, outputMaskName, beamFractionReal=1, c
     ## that the residuals left by tclean DOES NOT have beam
     ## information. Therefore we need to use the header of the .image file.
     
-    myimage=imageName+'.image'
-    myfluxim=imageName+'.pb'
-    casalog.post('myimage = %s, myfluxim = %s' % (myimage, myfluxim))
+    myimage = f'{imageName}.image'
+    myfluxim = f'{imageName}.pb'
+    casalog.post(f'myimage = {myimage}, myfluxim = {myfluxim}')
     os.system('rm -rf pbimage.im')
-    os.system('cp -r '+myfluxim+' pbimage.im')
-    myflux='pbimage.im'
-    header=imhead(imagename=myimage)
+    os.system(f'cp -r {myfluxim} pbimage.im')
+    myflux = 'pbimage.im'
+    header = imhead(imagename=myimage)
     mm = outputMaskName
-    freqAxis=np.where(header['axisnames']=='Frequency')[0][0]
-    nChannels=header['shape'][freqAxis]
-    multiBeams='perplanebeams' in header
+    freqAxis = np.where(header['axisnames']=='Frequency')[0][0]
+    nChannels = header['shape'][freqAxis]
+    multiBeams = 'perplanebeams' in header
     
     BLOCK1=True
     BLOCK2=True
@@ -55,22 +62,22 @@ def hacerMascara(imageName, maskThreshold, outputMaskName, beamFractionReal=1, c
         # The following checks whether there are multiple beams or not. Defines
         # an array of major and minor beamlengths
         if(multiBeams):
-            major=[]
-            minor=[]
+            major = []
+            minor = []
             for ch in range(0,nChannels):
                 # in arcsec by default, apparently
-                major.append(header['perplanebeams']['beams']['*'+str(ch)]['*0']['major']['value']) 
-                minor.append(header['perplanebeams']['beams']['*'+str(ch)]['*0']['minor']['value']) 
-            major=np.array(major)
-            minor=np.array(minor)
+                major.append(header['perplanebeams']['beams'][f'*{ch}']['*0']['major']['value']) 
+                minor.append(header['perplanebeams']['beams'][f'*{ch}']['*0']['minor']['value']) 
+            major = np.array(major)
+            minor = np.array(minor)
         else:
-            major=imhead(imagename=myimage,mode='get',hdkey='beammajor')['value'] # in arcsec by default, apparently
-            minor=imhead(imagename=myimage,mode='get',hdkey='beamminor')['value'] # in arcsec by default, apparently
+            major = header['beammajor']['value']
+            minor = header['beamminor']['value'] # in arcsec by default, apparently
         
-        unitCDELT=imhead(imagename=myimage,mode='get',hdkey='cdelt2')['unit']
-        if unitCDELT=='rad':
-            pixelsize=(imhead(imagename=myimage,mode='get',hdkey='cdelt2')['value'])/pi*180*3600 # in the header, these CDELT values are in radians
-        beamarea=(major*minor*pi/(4*log(2)))/(pixelsize**2) # beamarea in pixels' area
+        unitCDELT = header['cdelt2']['unit']
+        if unitCDELT == 'rad':
+            pixelsize = header['cdelt2']['value'] / pi*180*3600 # in the header, these CDELT values are in radians
+        beamarea = (major * minor * pi / (4*log(2))) / (pixelsize**2) # beamarea in pixels' area
         
         ## End Of Block 1   <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
         
@@ -80,11 +87,17 @@ def hacerMascara(imageName, maskThreshold, outputMaskName, beamFractionReal=1, c
         # string is the same as mm) with the maskThreshold. The gridding of the
         # mask is equivalent to that of the image.
         
-        if(useResidual):
-            immath(imagename = [imageName+'.residual'],outfile = mm,expr = 'iif(IM0 > '+str(maskThreshold) +',1.0,0.0)', mask=myflux+'>0.2')
+        if useResidual:
+            cubename = f'{imageName}.residual'
+            #immath(imagename = [imageName+'.residual'],outfile = mm,expr = 'iif(IM0 > '+str(maskThreshold) +',1.0,0.0)', mask=myflux+'>0.2')
         else:
-            immath(imagename = [myimage],outfile = mm,expr = 'iif(IM0 > '+str(maskThreshold) +',1.0,0.0)', mask=myflux+'>0.2')
-        #immath(imagename = [mm],outfile = mm,expr = 'iif(IM0 > '+str(thresh) +',1.0,0.0)', mask=myflux+'>0.2') # clean vs tclean
+            cubename = myimage
+            #immath(imagename = [myimage],outfile = mm,expr = 'iif(IM0 > '+str(maskThreshold) +',1.0,0.0)', mask=myflux+'>0.2')
+        pbmap = SpectralCube.read(myflux, format='casa_image')
+        cube = SpectralCube.read(cubename, format='casa_image')
+        mask = (pbmap > 0.2) & (cube > maskThreshold)
+        cube = cube.with_mask(mask)
+        make_casa_mask(cube, mm)
         
         casalog.post('Created maskThreshold mask')
         ## End of Block 2  <<<<<<<<<<<<<<<<<<<<<<
@@ -103,14 +116,14 @@ def hacerMascara(imageName, maskThreshold, outputMaskName, beamFractionReal=1, c
         else:
             neighborStructure = [[0,1,0],[1,1,1],[0,1,0]]
         
-        ia.open(mm)    # Open the mask
-        mask=ia.getchunk() # Get the data in an array, usually of dimension 4
+        #ia.open(mm)    # Open the mask
+        #mask=ia.getchunk() # Get the data in an array, usually of dimension 4
                            # (spatial x spatial x pol x frequency/velocity
                            # or (spatial x spatial x frequency/velocity x pol)
         if nChannels > 1: # In case of multiple beams
             polAxisPosition = np.where(header['axisnames']=='Stokes')[0][0]
             mask = np.squeeze(mask) # remove extra redundant dimension (polarization?) 
-            casalog.post('ShapeMASK %r' % (np.shape(mask),))
+            casalog.post(f'ShapeMASK {mask.shape}')
             # separate and label connected components
             labeled, j = scipy.ndimage.label(mask, structure=neighborStructure) 
             labelStack = set(range(1,j+1))
@@ -135,16 +148,6 @@ def hacerMascara(imageName, maskThreshold, outputMaskName, beamFractionReal=1, c
                 sizelimit = beamarea[canal]*beamFractionReal
                 aux = (sumapixels < sizelimit) & (labeled[:,:,canal] != 0)
                 mask[:,:,canal][aux] = 0
-                #for i in labelsInChannel:
-                #    sumapixels = counts[i]
-                #    logfile.write(str(canal)+'....'+str(sumapixels)+'..'+str(beamarea[canal]*beamFractionReal)+'..'+str(sumapixels<beamarea[canal]*beamFractionReal)+'\n')
-                #    # Zap small masks
-                #    ###if multiBeams:
-                #    if(sumapixels < (beamarea[canal]*beamFractionReal)):
-                #        mask[:,:,canal] *= (1-(labeled[:,:,canal]==i))
-                #    ###else:
-                #    ###    if(sumapixels<beamarea*beamFractionReal):
-                #    ###        mask[:,:,canal]*=(1-(labeled[:,:,canal]==i))        
             
             # The following gets the mask to the original dimensions of the image
             # It is assumed that 'Stokes' axis has no dimension
