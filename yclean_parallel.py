@@ -216,7 +216,10 @@ if(min(lz)>0 or max(lz)<nchan-1):
              inpfreqs=inpfreqs, outfreqs=outfreqs,
              output=source+'MASCARA.tc'+str(it-1)+'.m', overwrite=True)  
 
-casalog.post("Last threshold: %s" % threshold)
+try:
+    casalog.post("Last threshold: %s" % threshold)
+except NameError:
+    pass
 casalog.post("New threshold: "+str(2.0*rms*1e3)+'mJy')
 
 os.system('rm -rf '+imagename+'.tc0.workdirectory/auto*.n*.mask')
