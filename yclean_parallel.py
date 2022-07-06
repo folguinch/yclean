@@ -62,7 +62,7 @@ def get_stats(cube: SpectralCube,
 def yclean(vis: Path,
            imagename: str,
            nproc: int = 5,
-           min_limit_level = 1.5,
+           min_limit_level: float = 1.5,
            iter_limit: int = 10,
            log: Callable = casalog.post,
            **tclean_args) -> None:
