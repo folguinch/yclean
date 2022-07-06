@@ -1,111 +1,44 @@
-"""Tasks for creating a mask."""
-from collections import Counter
-from typing import Sequence
+"""Tasks for creating and writing masks."""
+from typing import Optional, TypeVar, Callable
 from pathlib import Path
-import os
-import sys
-import time
 
-from casatasks import casalog, imhead
+from astropy.io import fits
+from casatasks import casalog, importfits
 from spectral_cube import SpectralCube
-from spectral_cube.io.casa_masks import make_casa_mask
+import astropy.units as u
+import dask
+import dask.array as da
 import numpy as np
 import scipy.ndimage as ndimg
 
-def get_nchans(header: dict) -> int:
-    """Return the number of channels."""
-    freq_axis = np.where(header['axisnames']=='Frequency')[0][0]
-    return header['shape'][freq_axis]
+Array = TypeVar('Array', dask.array.core.Array)
 
-def copy_pbimg(image_name: str, copy_name: Path = Path('pbimage.im')) -> Path:
-    """Copy the pb image.
+def write_mask(mask: Array, cube: SpectralCube, output: Path) -> None:
+    """Write mask to disk.
 
     Args:
-      image_name: image name.
-      copy_name: optional; destination.
-
-    Returns:
-      The path of the copy.
+      mask: mask array
+      cube: spectral cube.
+      output: file name of the CASA mask.
     """
-    pbimg = Path(f'{image_name}.pb')
-    casalog.post(f'Copying {pbimg} to {copy_name}')
-    os.system(f'rm -rf {copy_name}')
-    os.system(f'cp -r {pbimg} {copy_name}')
+    # Header
+    header = cube.header
+    del header['BUNIT']
 
-    return copy_name
+    # FITS file
+    hdu = fits.PrimaryHDU(header=header, data=mask.astype('int16'))
+    fitsmask = output.with_suffix('.mask.fits')
+    hdu.writeto(fitsmask, overwrite=True)
 
-def get_beam_area(header: dict) -> Union[np.array, float]:
-    """Calculate the beam area."""
-    multi_beams = 'perplanebeams' in header
-    nchans = get_nchans(header)
+    # CASA file
+    importfits(fitsimage=str(fitsmask), imagename=str(output),
+               defaultaxes=True, defaultaxesvalues = ['','','','I'])
 
-    # The following checks whether there are multiple beams or not. Defines
-    # an array of major and minor beamlengths
-    if multi_beams:
-        major = []
-        minor = []
-        beams = header['perplanebeams']['beams']
-        for ch in range(0, nchans):
-            # in arcsec by default, apparently
-            major.append(beams[f'*{ch}']['*0']['major']['value'])
-            minor.append(beams[f'*{ch}']['*0']['minor']['value'])
-        major = np.array(major)
-        minor = np.array(minor)
-    else:
-        # in arcsec by default, apparently
-        major = header['beammajor']['value']
-        minor = header['beamminor']['value']
-
-    unit_cdelt = header['cdelt2']['unit']
-    if unit_cdelt == 'rad':
-        # in the header, these CDELT values are in radians
-        pixelsize = header['cdelt2']['value'] / pi*180*3600
-    else:
-        raise NotImplementedError(f'Pixelsize with unit: {unit_cdelt}')
-    # beamarea in pixels' area
-    beamarea = (major * minor * pi / (4 * log(2))) / (pixelsize**2)
-
-    return beamarea
-
-def generate_masked_cube(image_name:str, mask_threshold: float,
-                         use_residual: bool) -> SpectralCube:
-    """Create a masked cube with a threshold mask.
-
-    Args:
-      image_name: image name.
-      mask_threshold: flux threshold.
-      use_residual: use residual or image data.
-    """
-    # Copy the pb image
-    pbimg = copy_pbimg(image_name)
-
-    # El mero mero del asunto. It creates the mask 'output_mask_name' (this
-    # string is the same as mm) with the mask_threshold. The gridding of the
-    # mask is equivalent to that of the image.
-    if use_residual:
-        cubename = Path(f'{image_name}.residual')
-        #immath(imagename = [imageName+'.residual'],
-        #outfile = mm,
-        #expr = 'iif(IM0 > '+str(mask_threshold) +',1.0,0.0)',
-        #mask=myflux+'>0.2')
-    else:
-        cubename = Path(f'{image_name}.image')
-        #immath(imagename = [myimage],
-        #outfile = mm,
-        #expr = 'iif(IM0 > '+str(mask_threshold) +',1.0,0.0)',
-        #mask=myflux+'>0.2')
-    pbmap = SpectralCube.read(pbimg, format='casa_image')
-    cube = SpectralCube.read(cubename, format='casa_image')
-    mask = (pbmap > 0.2) & (cube > mask_threshold)
-    cube = cube.with_mask(mask)
-    #make_casa_mask(cube, output_mask_name)
-
-    return cube
-
-def remove_small_masks(cube: SpectralCube, header: dict,
-                       beamarea: Union[np.array, float],
-                       output_mask_name: Path,
-                       beam_fraction_real: float) -> SpectralCube:
+def remove_small_masks(mask: Array,
+                       beam_area: u.Quantity,
+                       beam_fraction: float,
+                       dilate: Optional[int] = None,
+                       log: Callable = casalog.post) -> Array:
     """Remove small masks pieces.
 
     Args:
@@ -114,233 +47,117 @@ def remove_small_masks(cube: SpectralCube, header: dict,
       beamarea: beam area array or float.
       output_mask_name: output mask file name.
       beam_fraction_real: beam fraction.
+      log: optional; logging function.
+
+    Returns:
+      A `dask` array.
     """
-    # Some useful definitions
-    mask = cube.mask
-    nchans = get_nchans(header)
+    # Some information first
+    beams = np.array(beam_area, dtype=int)
+    unique_beams = np.unique(beams)
+    log(f'Beam area range: {np.min(beams)} - {np.max(beams)}')
+    log(f'Number of unique beams: {len(unique_beams)}')
+    mask_array = mask.compute()
 
-    #ia.open(mm)    # Open the mask
-    #mask=ia.getchunk() # Get the data in an array, usually of dimension 4
-                       # (spatial x spatial x pol x frequency/velocity
-                       # or (spatial x spatial x frequency/velocity x pol)
-    if nchans > 1: # In case of multiple beams
-        # Mask size limit
-        sizelimit = beamarea * beam_fraction_real
+    # Label mask
+    structure = ndimg.generate_binary_structure(mask_array.ndim, 1)
+    labels, nlabels = ndimg.label(mask_array, structure=structure)
+    component_sizes = np.bincount(labels.ravel())
+    log(f'Labeled {nlabels} mask structures')
 
-        # remove extra redundant dimension (polarization?)
-        mask = np.squeeze(mask)
-        casalog.post(f'Mask shape: {mask.shape}')
+    # Iterate over unique beam values
+    for beam in unique_beams:
+        # Search where beam areas are equal
+        ind = beams == beam
 
-        # The neighboring structure to give to a cube. Otherwise it will assume
-        # that neighboring channels are not independent.
-        #logfile = open('logfilemasking.txt','w')
-        neighbor_structure = [
-            [[0, 0, 0], [0, 1, 0], [0, 0, 0]],
-            [[0, 1, 0], [0, 1, 0], [0, 1, 0]],
-            [[0, 0, 0], [0, 1, 0], [0, 0, 0]],
-        ]
+        # Dilate ind to include one extra channel in the borders
+        ind = ndimg.binary_dilation(ind, iterations=1)
+        log((f'Removing small mask structures for {np.sum(ind)} channels '
+             f'with beam area: {beam} pixels'))
 
-        # Separate and label connected components
-        labeled, j = ndimg.label(mask, structure=neighbor_structure)
-        label_stack = set(range(1, j+1))
-        casalog.post(f'Labeled mask: {j} pieces')
-        for canal in range(nchans):
-            #if (canal%20==0):
-            #casalog.post("Channel # " + str(canal))
-            counts = Counter(np.ndarray.flatten(labeled[:,:,canal]).tolist())
-            labels_in_channel = counts.keys()
-            del labels_in_channel[0]
-            #print set(labelsInChannel)
-            #casalog.post('Possible issue: %r' %
-            #        (set(labelsInChannel)<=label_stack,))
-            if set(labels_in_channel) <= label_stack:
-                label_stack = label_stack - set(labels_in_channel)
-            else:
-                raise Exception('Error in labeling')
-    
-            # Remove small connected components
-            sumapixels = np.bincount(labeled[:,:,canal].flatten())
-            sumapixels = sumapixels[labeled[:,:,canal]]
-            aux = (sumapixels < sizelimit[canal]) & (labeled[:,:,canal] != 0)
-            mask[:,:,canal][aux] = 0
-        
-        # The following gets the mask to the original dimensions of the image
-        # It is assumed that 'Stokes' axis has no dimension
-        pol_axis_position = np.where(header['axisnames'] == 'Stokes')[0][0]
-        axes_order = [1, 2, 3]
-        axes_order.insert(pol_axis_position, 0)
-        mask = np.transpose(mask[None,:], tuple(axes_order))
-                
-    else: # In case of single beam
-        neighbor_structure = [
-            [0, 1, 0],
-            [1, 1, 1],
-            [0, 1, 0],
-        ]
-        labeled, j = ndimg.label(mask, structure=neighbor_structure)
-        casalog.post('Labeled mask')
-        for i in range(1, j):
-            sumapixels = np.sum((labeled == j).astype(int), axis=(0, 1))
-            if sumapixels < beamarea * beam_fraction_real:
-                mask[labeled==i] = 0
-           
-    cube = cube.with_mask(mask)
-    make_casa_mask(cube, output_mask_name)
-    #ia.putchunk(mask)
-    #ia.done()
-    #ia.close()
-    #logfile.close()
+        # Filter small
+        small = component_sizes < beam * beam_fraction
+        log(f'Fitered out {np.sum(small)} small mask structures')
+        small_mask = small[labels]
+        # pylint: disable=E1130
+        small_mask[~ind] = False
+        mask_array[small_mask] = False
 
-    return cube
+    # Dilate
+    if dilate is not None and dilate > 0:
+        log(f'Dilating mask {dilate} iteration(s)')
+        mask_array = ndimg.binary_dilation(mask_array, structure=structure,
+                                           iterations=dilate)
 
-def combine_masks(output_mask_name: Path, combine_mask: Sequence[Path],
-                  imagename: Path, multi_beams: bool):
-    """Combine input masks.
-    
-    Args:
-      output_mask_name: output mask.
-      combine_mask: masks to combine.
-      imagename: image name.
-      multi_beams: has the input image multiple beams?
-    """
-    ##  Combine the main mask with the rest 
-    inpmask = [output_mask_name]
-    #inpmask.append(imageName+'.mask') if(os.path.exists(imageName+'.mask')) else 1
-    #inpmask.append(imageName+'.pb') if(os.path.exists(imageName+'.pb')) else 1
-    for cmask in combine_mask:
-        if cmask.is_dir():
-            inpmask.append(cmask)
-        else:
-            casalog.post(f'Mask does not exists: {cmask}')
-    #if isinstance(combine_mask, basestring):
-    #    inpmask.append(combine_mask) if(os.path.exists(combine_mask)) else 1   
-    #elif all(isinstance(item, basestring) for item in combine_mask):
-    #    for cM in combine_mask:
-    #        inpmask.append(cM) if(os.path.exists(cM)) else 1 
-    #else:
-    #    raise Exception("Error in combine_mask keyword")
-    casalog.post(f'Masks to combine: {inpmask}')
-    
-    # If multiBeams, delete all beams to run makemask
-    if multi_beams:
-        # Masks restoring beams
-        rb = {}
-        for mascara in inpmask:
-            #print mascara
-            ia.open(mascara)
-            rbaux = ia.restoringbeam()
-            if rbaux:# check it has beam information
-                rb[mascara] = rbaux
-                ia.setrestoringbeam(remove=True) # chan!
-            ia.close()
+    return da.from_array(mask_array, chunks=mask.chunks)
 
-        # Image restoring beam
-        ia.open(imagename)
-        rbaux = ia.restoringbeam()
-        if rbaux:
-            rb[imagename] = rbaux
-            ia.setrestoringbeam(remove=True) # chan!
-        else:
-            ia.close()
-            raise Exception('Image must have multi beams')
-        ia.close()
-        
-        # Security feature, save the beams just in case
-        tag = str(int(round(time.time()))) 
-        np.save(f'_beams_{tag}.npy', rb)
-        
-    # makemask. Despite the name, it is not 'that' important. Maybe
-    # convenient to combine with previously defined masks.
-    makemask(mode='copy', inpimage=output_mask_name, inpmask=inpmask, 
-             output=output_mask_name, overwrite=True)
-    
-    # Recover the erased multibeams. This means that all beams will be lost
-    # if the code does not run until the end of this block. But we have to
-    # be brave
-    if multi_beams: 
-        for mascara in inpmask:
-            if mascara in rb:
-                ia.open(mascara)
-                for ch in range(rb[mascara]['nChannels']):
-                    ia.setrestoringbeam(
-                        channel=ch, 
-                        beam=rb[mascara]['beams'][f'*{ch}']['*0'],
-                    )
-                ia.close()
-        
-        ia.open(imagename)
-        for ch in range(rb[imagename]['nChannels']):
-            ia.setrestoringbeam(channel=ch,
-                                beam=rb[imagename]['beams'][f'*{ch}']['*0'])
-        ia.close()
-            	        	        
-def hacer_mascara(image_name: str,
-                  mask_threshold: float,
-                  output_mask_name: Path,
-                  beam_fraction_real: float = 1.,
-                  combine_mask: Sequence[Path] = (),
-                  use_residual: bool = True) -> None:
+def make_threshold_mask(cube: SpectralCube,
+                        residual: SpectralCube,
+                        pbmap: SpectralCube,
+                        mask_threshold: u.Quantity,
+                        output_mask: Path,
+                        previous_mask: Optional[Array] = None,
+                        beam_fraction: float = 1.,
+                        dilate: Optional[int] = None,
+                        use_residual: bool = True,
+                        log: Callable = casalog.post) -> Array:
     """Creates a mask from flux threshold.
-    
-    Takes image `image_name.residual` if `use_residual=True` --- which is the
-    default. Otherwise, it takes `image_name.image`. It calculates a mask
-    with 1s over the `mask_threshold` (assumed a number in the same units as
-    image). The task will remove connected components smaller than a
-    'fraction' (could be > 1) of the beam size. Lets call this mask `MM`. If
-    existing image(s) name(s) is(are) given in `combine_mask`, the task will
-    redefine `MM` by combining it -- using a logical `OR` -- with the mask(s)
-    of all values greater than zero in (each mask in) `combine_mask`.  Mask
-    `MM` is recorded with the the name `output_mask_name`.
-    
-    IMPORTANT: For the current implementation, it is assumed that the
-    associated `.mask`, `.pb`, and `.flux` files have the same grid as
-    `image_name.image` and the same multibeam structure.
+
+    The `residual` image is used if `use_residual=True`, which is the default.
+    Otherwise, it takes `cube` image. It calculates a mask with 1s over the
+    `mask_threshold`. The task will remove connected components smaller than a
+    fraction (could be > 1) of the beam size. Lets call this mask `MM`. If
+    existing image(s) name(s) is(are) given in `previous_mask`, the task will
+    redefine `MM` by combining it, using a logical `OR`, with that mask.  Mask
+    `MM` is recorded with the the name `output_mask`.
+
+    The mask can be dilated in all directions (spatial and spectral). The
+    number of iterations to dilate is given by the value of the input parameter
+    `dilate`.
 
     Args:
-      image_name: image base name.
+      cube: image spectral cube.
+      residual: residual spectral cube.
+      pbmap: primary beam spectral cube.
       mask_threshold: threshold level.
-      output_mask_name: output mask file name.
-      beam_fraction_real: optional; fraction of the beam to reject small masks.
-      combine_mask: optional; masks to combine.
+      output_mask: output mask file name.
+      previous_mask: optional; mask to combine with the new mask.
+      beam_fraction: optional; fraction of the beam to reject small masks.
+      dilate: optional; number of dilation iterations.
       use_residual: optional; use residual image?
+      log: optional; logging function.
+
+    Returns:
+      A binary mask.
 
     Notes:
-      Version 28 Dic 2017, updated to python 3 on May 2021.
+      Version 28 Dic 2017.
+      Updated to python 3 on May 2021.
+      Improved on June 2022.
     """
-    # If "imageName.mask" exists, it will redefine MM by combination with
-    # it. If "imageName.pb" exists, it will redefine MM by combination with
-    # it.
-    
-    #pass
-    ## START OF SUBROUTINE CODE
-    
-    ## Necessary definitions. Determine properties of image/cube. Save the
-    ## header, determine whether there is a single beam or multiple. Save
-    ## beam areas in an array in the latter case. One important issue is
-    ## that the residuals left by tclean DOES NOT have beam
-    ## information. Therefore we need to use the header of the .image file.
-    
-    imagename = Path(f'{image_name}.image')
-    casalog.post(f'Image name: {imagename}')
-    header = imhead(imagename=imagename)
-    multi_beams = 'perplanebeams' in header
-    
-    # Switches
-    step1 = True
-    step2 = True
-    step3 = True
-    step4 = True
-    
-    # Steps
-    if step1:
-        beamarea = get_beam_area(header)
-    if step2:
-        cube = generate_masked_cube(mask_threshold, image_name, use_residual)
-        casalog.post('Created mask_threshold mask')
-    if step3:
-        cube = remove_small_masks(cube, header, beamarea, output_mask_name,
-                                  beam_fraction_real)
-        casalog.post('Small masks removed')
-    if step4:
-        combine_masks(output_mask_name, combine_mask, imagename, multi_beams)
-        casalog.post(f'Created {output_mask_name}\nGood day')
+    # Create the threshold mask
+    log('Calculating threshold mask')
+    if use_residual:
+        mask = (pbmap > 0.2*pbmap.unit) & (residual > mask_threshold)
+    else:
+        mask = (pbmap > 0.2*pbmap.unit) & (cube > mask_threshold)
+
+    # Operate over dask mask
+    with dask.config.set(**{'array.slicing.split_large_chunks': False}):
+        mask = mask.include()
+
+        # Join with previous mask
+        if previous_mask is not None:
+            log('Combining masks')
+            mask = mask | previous_mask
+
+        # Filter out small mask pieces
+        log('Removing small masks')
+        mask = remove_small_masks(mask, cube.pixels_per_beam, beam_fraction,
+                                  dilate=dilate, log=log)
+
+        # Write mask
+        log('Writing mask')
+        write_mask(mask, cube, output_mask)
+
+    return mask

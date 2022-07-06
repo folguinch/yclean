@@ -6,219 +6,210 @@
 #>>> =====================================================#
 """Automasking routine for ALMA cube CLEANing."""
 # CASA 6.0+
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Callable
 from pathlib import Path
 import os
 
-from casatasks import casalog, tclean, imhead, imstat, exportfits, makemask
-from casatools import image
+from astropy import stats
+from casatasks import casalog
+from spectral_cube import SpectralCube
+import astropy.units as u
 import numpy as np
 
 # Import local modules
-from hacer_mascara import hacer_mascara
-from second_max_local import second_max_local
+from .hacer_mascara import make_threshold_mask
+from .utils import (load_images, tclean_parallel, common_beam_cube,
+                    second_max_local)
 
-def get_stats(imagename: str, secondary_lobe_level: float, nchan: int,
-              xstat: Optional[dict] = None,
-              planes: Tuple[int] = (2, 8),
-              nit: int = 0) -> tuple:
-    """Calculate image statistics (rms, limits).
+def get_stats(cube: SpectralCube,
+              residual: SpectralCube,
+              secondary_lobe_level: float,
+              residual_max: Optional[u.Quantity] = None,
+              planes: Tuple[int] = (2, 8)) -> tuple:
+    """Calculate image statistics (rms, max, limits).
 
     Args:
-      imagename: input image.
+      cube: image spectral cube.
+      residual: residual spectral cube.
       secondary_lobe_level: secondary lobe level.
-      nchan: number of channels in image.
-      xstat: input image statistics.
-      planes: channels between which statistics are measured.
-      nit: iteration number.
+      residual_max: optional; residual maximum value from previous iterations.
+      planes: optional; channel percentiles where statistics are measured.
 
     Returns:
-      rms value calculated in the input planes.
-      new statistics.
-      limit level SNR.
+      The rms value calculated from the input planes.
+      Updated maximum of the residual.
+      Limit level SNR.
     """
     # Channel sample
     planes = np.arange(*planes, dtype=float)
-    planes = list((np.floor(planes / 10 * nchan)).astype(int))
-    planes = ';'.join(map(str, planes))
-    for dummycounter in range(5):
-        try:
-            rms = 1.42602219 * \
-                imstat(f'{imagename}.tc{nit}.image',
-                       chans=planes)['medabsdevmed'][0]
-            break
-        except TypeError:
-            casalog.post(f'Trying imstat again: {dummycounter}')
+    planes = np.floor(planes / 10 * cube.shape[0]).astype(int)
+    rms = 1.42602219 * \
+            stats.median_absolute_deviation(cube.unmasked_data[planes,:,:],
+                                            ignore_nan=True)
 
     # Residual stats and SNR
-    for dummycounter in range(5):
-        try:
-            newxstat = imstat(f'{imagename}.tc{nit}.residual')
-            casalog.post(f"Stats max: {xstat['max']}")
-            break
-        except TypeError:
-            casalog.post(f'Trying imstat again: {dummycounter}')
-
-    if xstat is None or newxstat['max'] <= xstat['max']:
-        xstat = newxstat
+    new_residual_max = residual.max()
+    if residual_max is None or new_residual_max <= residual_max:
+        residual_max = new_residual_max
     else:
         return rms, None, None
 
     # Limit level
-    limit_level_snr = xstat['max'] / rms * secondary_lobe_level
+    limit_level_snr = residual_max / rms * secondary_lobe_level
 
-    return rms, xstat, limit_level_snr
+    return rms, residual_max, limit_level_snr
 
-def yclean(vis: Path, imagename: str, **tclean_args) -> None:
+def yclean(vis: Path,
+           imagename: str,
+           nproc: int = 5,
+           min_limit_level = 1.5,
+           iter_limit: int = 10,
+           log: Callable = casalog.post,
+           **tclean_args) -> None:
     """Automatic CLEANing.
+
+    The data is cleaned with an incremental mask for each iteration.
+    The maximum number of iterations can be controled with the `iter_limit`
+    parameter. The `tclean` threshold is determined from the previous iteration
+    (starting with a dirty cube). The `iter_limit` parameter allows to control
+    the minimum threshold allowed: `threshold = 2 * min_limit_level * rms`.
 
     Args:
       vis: visibility filename.
       imagename: imagename base name.
+      nproc: optional; number of processes for parallel processing.
+      min_limit_level: optional; minimum SNR limit level.
+      iter_limit: optional; maximum number of yclean iterations.
+      log: optional; logging function.
       tclean_args: arguments for `tclean`.
     """
-    # Close and wipe out clean previous files
-    img = image()
-    img.close()
-    img.done()
+    # Some useful definitions
+    work_img = Path(f'{imagename}.tc0.image')
+    mask_name = work_img.with_suffix('.mask')
+    mask_dir = work_img.parent / 'masks'
+    mask_dir.mkdir(exist_ok=True)
 
     # Dirty
-    it = 0
-    aux = Path(f'{imagename}.tc0.image')
     tclean_args.update({'parallel': True,
-                        'niter': 1})
-    if not aux.is_dir():
-        tclean(vis=vis, imagename=f'{imagename}.tc0', **tclean_args)
+                        'niter': 0})
+    if not work_img.is_dir():
+        log('Calculating dirty image')
+        work_img.parent.mkdir(exist_ok=True)
+        tclean_parallel(vis, Path(f'{imagename}.tc0'), nproc, tclean_args)
+        #tclean(vis=vis, imagename=f'{imagename}.tc0', **tclean_args)
     else:
-        casalog.post('Data found ... skipping first tclean')
-
-    # Useful values
-    h0 = imhead(imagename=f'{imagename}.tc0.image')
-    nchan = h0['shape'][np.where(h0['axisnames']=='Frequency')[0][0]]
+        log('Dirty found ... skipping initial tclean')
+    # pylint: disable=W0632
+    psf, pbmap, cube, residual = load_images(work_img,
+                                             load=('psf', 'pb', 'image',
+                                                   'residual'),
+                                             log=log)
+    residual = residual * cube.unit
 
     # The PSF does not change in further iterations
-    secondary_lobe_level = second_max_local(f'{imagename}.tc0.psf')
-    casalog.post(f'Secondary Lobe PSF Level: {secondary_lobe_level}')
+    secondary_lobe_level = second_max_local(psf)
+    log(f'Secondary Lobe PSF Level: {secondary_lobe_level}')
 
     # RMS calculated in a subset of channels
-    rms, xstat, limit_level_snr = get_stats(imagename, secondary_lobe_level,
-                                            nchan, nit=it)
+    rms, residual_max, limit_level_snr = get_stats(cube, residual,
+                                                   secondary_lobe_level)
+    log(f'Dirty rms: {rms}')
+    log(f'Residual maxmimum: {residual_max}')
+    log(f'Limit level SNR: {limit_level_snr}')
 
-    #### BEGINNING OF WHILE
-    while limit_level_snr > 1.5:
+    # Incremental step
+    it = 0
+    cumulative_mask = None
+    while limit_level_snr > min_limit_level:
         # Iteration limit
-        if it > 10:
+        if it > iter_limit:
             break
         it += 1
 
         # Some logging
-        casalog.post((f'Iter {it}: SNR of Maximum Residual:'
-                      f'-----{limit_level_snr/secondary_lobe_level}'))
+        log((f'Iter {it}: SNR of Maximum Residual: '
+             f'{limit_level_snr/secondary_lobe_level}'))
         # threshold needs to be (slightly?) above limit_level_snr
-        threshold = f'{limit_level_snr * 2 * rms * 1.e3}mJy'
-        casalog.post(f'Iter {it}: SNR of threshold:-----{limit_level_snr}')
+        log(f'Iter {it}: SNR of threshold: {limit_level_snr}')
 
         # This is one idea: the masklevel never gets below SNR=4. When the
         # threshold level is high, masklevel is close limit_level_snr*rms
-        masklevel = (limit_level_snr + \
-                     1.5 * np.exp(-(limit_level_snr - 1.5) / 1.5)) * rms
-        casalog.post(f'Iter {it}: SNR of masklevel: -----{masklevel/rms}')
+        masklevel = 1.5 * np.exp(-(limit_level_snr-1.5) / 1.5)
+        masklevel = (limit_level_snr + masklevel) * rms
+        log(f'Iter {it}: SNR of masklevel: {masklevel/rms}')
+
+        # Clean threshold
+        rms = rms.to(u.mJy/u.beam)
+        threshold = f'{2*limit_level_snr*rms.value}mJy'
+        log(f'Iter {it}: Threshold: {threshold}')
 
         # The masks are defined based on the previous image and residuals
-        output_mask_name = Path(f"{tclean_args['field']}MASCARA.tc{it-1}.m")
-        if not output_mask_name.is_dir():
-            aux = Path(f"{tclean_args['field']}MASCARA.tc{it-2}.m")
-            combine_mask = [aux] if it > 1 else []
-            hacer_mascara(f'{imagename}.tc0', masklevel, output_mask_name,
-                          beam_fraction_real=0.5, use_residual=True,
-                          combine_mask=combine_mask)
+        os.system(f'rm -rf {mask_name}')
+        new_mask_name = mask_dir / f'{imagename.name}.tc{it-1}.mask'
+        cumulative_mask = make_threshold_mask(cube, residual, pbmap,
+                                              masklevel, new_mask_name,
+                                              beam_fraction=0.5,
+                                              use_residual=True,
+                                              previous_mask=cumulative_mask)
 
-            os.system(f'rm -rf {imagename}.tc0.workdirectory/auto*.n*.mask')
+        # Run tclean
+        tclean_args.update({'parallel': True,
+                            'niter': 100000,
+                            'threshold': threshold,
+                            'startmodel': '',
+                            'mask': str(new_mask_name)})
+        tclean_parallel(vis, Path(f'{imagename}.tc0'), nproc, tclean_args)
 
-            # Run tclean
-            tclean_args.update({'parallel': True,
-                                'niter': 100000,
-                                'threshold': threshold,
-                                'startmodel': '',
-                                'mask': output_mask_name})
-            tclean(vis=vis, imagename=f'{imagename}.tc0', **tclean_args)
-            #startmodel=imagename+'.tc'+str(it-1)+'.model',
-        else:
-            # In case of resuming
-            casalog.post(f'Skipping mask {output_mask_name}')
+        # Load new images
+        export_to = Path(f'{imagename}.tc_{it}.image')
+        cube, residual = load_images(work_img, export_to=export_to, log=log)
+        residual = residual * cube.unit
 
-        ##### RMS calculated in a subset of channels
-        rms, xstat, limit_level_snr = get_stats(imagename,
-                                                secondary_lobe_level,
-                                                nchan,
-                                                xstat=xstat,
-                                                planes=(2, 9),
-                                                nit=0)
-        if xstat is None:
+        # New stats
+        rms, residual_max, limit_level_snr = get_stats(
+            cube,
+            residual,
+            secondary_lobe_level,
+            residual_max=residual_max,
+            planes=(2, 9),
+        )
+        if residual_max is None:
+            log('Residual maximum increased, breaking ...')
             break
 
-        # Convert to fits
-        fitsimage = Path(f'{imagename}.tc_{it}.image.fits')
-        if not fitsimage.exists():
-            for ext in ['image', 'residual', 'mask']:
-                exportfits(f'{imagename}.tc0.{ext}',
-                           fitsimage=f'{imagename}.tc_{it}.{ext}.fits',
-                           velocity=True)
-    #### END OF WHILE
-
-    casalog.post('Reached limit, cleaning to 2. rms, masklevel = 4 sigma')
+    # Calculate a final 3*sigma mask
+    log('Main iteration cycle done')
     it += 1
-    output_mask_name = f"{tclean_args['field']}MASCARA.tc{it-1}.m"
-    if it > 1:
-        combine_mask = [Path(f"{tclean_args['field']}MASCARA.tc{it-2}.m")]
-    else:
-        combine_mask = []
-    hacer_mascara(f'{imagename}.tc0', 3. * rms, output_mask_name,
-                  beam_fraction_real=0.5, use_residual=True,
-                  combine_mask=combine_mask)
-
-    ## Extiende en un par de canalcitos mas a las mascaras. Las lineas no
-    ## terminan tan abruptamente, pero ciertamente bajan de 4 sigma lejos de la
-    ## vlsr. (POR HACER: UNA FUNCION APARTE QUE HAGA ESTO)
-    img.open(output_mask_name)
-    lz = img.getchunk()
-    img.close()
-    lz = list(np.nonzero(np.amax(np.squeeze(lz), axis=(0,1)))[0])
-    inpfreqs = []
-    outfreqs = []
-    if min(lz) > 0 or max(lz) < nchan-1:
-        if min(lz) > 0:
-            inpfreqs.append(np.asscalar(min(lz)))
-            outfreqs += [np.asscalar(min(lz))-1, np.asscalar(min(lz))]
-        if max(lz) < nchan-1:
-            inpfreqs.append(np.asscalar(max(lz)))
-            outfreqs += [np.asscalar(max(lz)), np.asscalar(max(lz))+1]
-        makemask(mode='expand', inpimage=output_mask_name,
-                 inpmask=output_mask_name, inpfreqs=inpfreqs,
-                 outfreqs=outfreqs, output=output_mask_name,
-                 overwrite=True)
+    os.system(f'rm -rf {mask_name}')
+    new_mask_name = mask_dir / f'{imagename.name}.tc{it-1}.mask'
+    masklevel = 3. * rms
+    # The mask is dilated 1 pixel in each direction, the original code dilates
+    # only in the spetral direction
+    cumulative_mask = make_threshold_mask(cube, residual, pbmap,
+                                          masklevel, new_mask_name,
+                                          beam_fraction=0.5,
+                                          use_residual=True,
+                                          previous_mask=cumulative_mask,
+                                          dilate=1)
 
     # Last clean
     try:
-        casalog.post(f'Last threshold: {threshold}')
+        log(f'Last threshold: {threshold}')
     except NameError:
         pass
     threshold = f'{2.0*rms*1e3}mJy'
-    casalog.post(f'New threshold: {threshold}')
-    os.system(f'rm -rf {imagename}.tc0.workdirectory/auto*.n*.mask')
+    log(f'Final threshold: {threshold}')
     tclean_args.update({'parallel': True,
                         'niter': 100000,
                         'threshold': threshold,
                         'startmodel': '',
-                        'mask':output_mask_name,
-                        'pblimit':0.1})
-    tclean(vis=vis, imagename=f'{imagename}.tc0', **tclean_args)
-        #startmodel=imagename+'.tc'+str(it-1)+'.model',
+                        'mask': str(new_mask_name),
+                        'pblimit': 0.1})
+    tclean_parallel(vis, Path(f'{imagename}.tc0'), nproc, tclean_args)
 
     # Export FITS
-    for ext in ['image', 'pb']:
-        exportfits(f'{imagename}.tc0.{ext}',
-                   fitsimage=f'{imagename}.tc_final.{ext}.fits', velocity=True)
-
-    # Clean up
-    os.system(f"rm -rf {tclean_args['field']}MASCARA.tc*.m")
+    export_to = Path(f'{imagename}.tc_final.image')
+    cube, _ = load_images(work_img, load=('image', 'pb'), export_to=export_to,
+                           log=log)
+    common_beam_cube(cube, export_to.with_suffix('.common_beam.image.fits'),
+                     log=log)
