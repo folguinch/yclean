@@ -11,7 +11,7 @@ import dask.array as da
 import numpy as np
 import scipy.ndimage as ndimg
 
-Array = TypeVar('Array', dask.array.core.Array)
+Array = TypeVar('Array', dask.array.core.Array, np.array)
 
 def write_mask(mask: Array, cube: SpectralCube, output: Path) -> None:
     """Write mask to disk.
