@@ -44,7 +44,7 @@ def load_images(imagename: Path,
 
     return tuple(images)
 
-def second_max_local(psf: 'SpectralCube'):
+def second_max_local(psf: SpectralCube):
     """Determine the psf secondary lobe level."""
     # Central plane
     midpsf = psf.unmasked_data[np.floor(psf.shape[0]/2).astype(int),:,:]
@@ -123,4 +123,3 @@ def common_beam_cube(cube: SpectralCube, filename: Path,
     # Convolve
     new_cube = cube.convolve_to(common_beam)
     new_cube.write(filename)
-
