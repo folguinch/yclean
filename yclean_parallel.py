@@ -64,8 +64,9 @@ def yclean(vis: Path,
            nproc: int = 5,
            min_limit_level: float = 1.5,
            iter_limit: int = 10,
+           common_beam: bool = False,
            log: Callable = casalog.post,
-           **tclean_args) -> None:
+           **tclean_args) -> Tuple[Path]:
     """Automatic CLEANing.
 
     The data is cleaned with an incremental mask for each iteration.
@@ -80,8 +81,13 @@ def yclean(vis: Path,
       nproc: optional; number of processes for parallel processing.
       min_limit_level: optional; minimum SNR limit level.
       iter_limit: optional; maximum number of yclean iterations.
+      common_beam: optional; calculate common beam cube?
       log: optional; logging function.
       tclean_args: arguments for `tclean`.
+
+    Returns:
+      The path of the final image.
+      The path of the final image converted to FITS.
     """
     # Some useful definitions
     work_img = Path(f'{imagename}.tc0.image')
@@ -211,5 +217,9 @@ def yclean(vis: Path,
     export_to = Path(f'{imagename}.tc_final.image')
     cube, _ = load_images(work_img, load=('image', 'pb'), export_to=export_to,
                            log=log)
-    common_beam_cube(cube, export_to.with_suffix('.common_beam.image.fits'),
-                     log=log)
+    if common_beam:
+        common_beam_cube(cube,
+                         export_to.with_suffix('.common_beam.image.fits'),
+                         log=log)
+
+    return work_img, export_to.with_suffix('image.fits')
