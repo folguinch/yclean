@@ -39,6 +39,7 @@ def load_images(imagename: Path,
             exportfits(imagename=str(name), fitsimage=str(fitsname))
         image = SpectralCube.read(name, use_dask=True, format='casa')
         image.allow_huge_operations = True
+        image.use_dask_scheduler('threads', num_workers=12)
         images.append(image)
         log(f'Loaded {imtype} with shape {image.shape}')
 
@@ -104,7 +105,7 @@ def tclean_parallel(vis: Path,
 
 def common_beam_cube(cube: SpectralCube, filename: Path,
                      log: Callable = casalog.post) -> None:
-    """Convolve the cube to a single beam data cube.
+    """Convolve the cube to a single beam and calsulates the minimal subcube.
 
     Args:
       cube: the spectral cube.
@@ -116,10 +117,12 @@ def common_beam_cube(cube: SpectralCube, filename: Path,
     minbeam, maxbeam =  cube.beams.extrema_beams()
     common_asec = [common_beam.minor.to(u.arcsec),
                    common_beam.major.to(u.arcsec)]
-    log(f'Smallest beam: {minbeam.minor} {minbeam.major}')
-    log(f'Largest beam: {maxbeam.minor} {maxbeam.major}')
+    log(f'Smallest beam: {minbeam.major} {minbeam.minor}')
+    log(f'Largest beam: {maxbeam.major} {maxbeam.minor}')
     log(f'Common beam: {common_asec[0]} {common_asec[1]}')
 
     # Convolve
-    new_cube = cube.convolve_to(common_beam)
+    new_cube = cube.convolve_to(common_beam, save_to_tmp_dir=True,
+                                allow_huge=True)
+    new_cube = new_cube.minimal_subcube(spatial_only=True)
     new_cube.write(filename)

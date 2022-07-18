@@ -48,7 +48,7 @@ def get_stats(cube: SpectralCube,
                                             ignore_nan=True)
 
     # Residual stats and SNR
-    new_residual_max = residual.max()
+    new_residual_max = residual.max() * cube.unit
     if residual_max is None or new_residual_max <= residual_max:
         residual_max = new_residual_max
     else:
@@ -110,7 +110,6 @@ def yclean(vis: Path,
                                              load=('psf', 'pb', 'image',
                                                    'residual'),
                                              log=log)
-    residual = residual * cube.unit
 
     # The PSF does not change in further iterations
     secondary_lobe_level = second_max_local(psf)
@@ -145,8 +144,8 @@ def yclean(vis: Path,
         log(f'Iter {it}: SNR of masklevel: {masklevel/rms}')
 
         # Clean threshold
-        rms = rms.to(u.mJy/u.beam)
-        threshold = f'{2*limit_level_snr*rms.value}mJy'
+        rms_mjy = rms.to(u.mJy/u.beam)
+        threshold = f'{2*limit_level_snr*rms_mjy.value}mJy'
         log(f'Iter {it}: Threshold: {threshold}')
 
         # The masks are defined based on the previous image and residuals
@@ -169,7 +168,6 @@ def yclean(vis: Path,
         # Load new images
         export_to = Path(f'{imagename}.tc_{it}.image')
         cube, residual = load_images(work_img, export_to=export_to, log=log)
-        residual = residual * cube.unit
 
         # New stats
         rms, residual_max, limit_level_snr = get_stats(
@@ -190,7 +188,7 @@ def yclean(vis: Path,
     new_mask_name = mask_dir / f'{imagename.name}.tc{it-1}.mask'
     masklevel = 3. * rms
     # The mask is dilated 1 pixel in each direction, the original code dilates
-    # only in the spetral direction
+    # only in the spectral direction
     cumulative_mask = make_threshold_mask(cube, residual, pbmap,
                                           masklevel, new_mask_name,
                                           beam_fraction=0.5,
@@ -203,7 +201,8 @@ def yclean(vis: Path,
         log(f'Last threshold: {threshold}')
     except NameError:
         pass
-    threshold = f'{2.0*rms*1e3}mJy'
+    rms_mjy = rms.to(u.mJy/u.beam)
+    threshold = f'{2.0*rms_mjy.value}mJy'
     log(f'Final threshold: {threshold}')
     tclean_args.update({'parallel': True,
                         'niter': 100000,

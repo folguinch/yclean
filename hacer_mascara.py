@@ -138,7 +138,8 @@ def make_threshold_mask(cube: SpectralCube,
     # Create the threshold mask
     log('Calculating threshold mask')
     if use_residual:
-        mask = (pbmap > 0.2*pbmap.unit) & (residual > mask_threshold)
+        threshold = mask_threshold.to(cube.unit).value * residual.unit
+        mask = (pbmap > 0.2*pbmap.unit) & (residual > threshold)
     else:
         mask = (pbmap > 0.2*pbmap.unit) & (cube > mask_threshold)
 
