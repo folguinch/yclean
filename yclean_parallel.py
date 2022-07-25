@@ -221,4 +221,4 @@ def yclean(vis: Path,
                          export_to.with_suffix('.common_beam.image.fits'),
                          log=log)
 
-    return work_img, export_to.with_suffix('image.fits')
+    return work_img, export_to.with_suffix('.image.fits')
