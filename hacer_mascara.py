@@ -42,11 +42,10 @@ def remove_small_masks(mask: Array,
     """Remove small masks pieces.
 
     Args:
-      cube: spectral cube.
-      header: image header.
-      beamarea: beam area array or float.
-      output_mask_name: output mask file name.
-      beam_fraction_real: beam fraction.
+      mask: mask array.
+      beam_area: beam area.
+      beam_fraction: fraction of the beam area for small masks.
+      dilate: optional; number of iteration to dilate the final mask.
       log: optional; logging function.
 
     Returns:
