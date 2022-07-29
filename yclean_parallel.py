@@ -205,7 +205,7 @@ def yclean(vis: Path,
     threshold = f'{2.0*rms_mjy.value}mJy'
     log(f'Final threshold: {threshold}')
     tclean_args.update({'parallel': True,
-                        'niter': 100000,
+                        'niter': 1000000,
                         'threshold': threshold,
                         'startmodel': '',
                         'mask': str(new_mask_name),
