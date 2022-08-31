@@ -1,11 +1,10 @@
 #>>> =====================================================#
-#>>>             YCLEAN Version 2020
+#>>>             YCLEAN Version 2022
 #>>>
 #>>> Original from: Yanett Contreras
 #>>> Adapted to python>=3.6 by Fernando Olguin
 #>>> =====================================================#
 """Automasking routine for ALMA cube CLEANing."""
-# CASA 6.0+
 from typing import Optional, Tuple, Callable
 from pathlib import Path
 import os
