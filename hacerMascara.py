@@ -112,7 +112,7 @@ def hacerMascara(imageName, maskThreshold, outputMaskName, beamFractionReal=1, c
             for dummy in range(5):
                 mask = np.squeeze(mask) # remove extra redundant dimension (polarization?) 
                 casalog.post('ShapeMASK %r' % (np.shape(mask),))
-                if len(np.shape(mask))==1 and dummy<=1:
+                if len(np.shape(mask))==1 and dummy<=3:
                     casalog.post('Error in immath, trying again')
                     os.system('rm -r ' + mm)
                     if(useResidual):
@@ -127,7 +127,7 @@ def hacerMascara(imageName, maskThreshold, outputMaskName, beamFractionReal=1, c
                     mask = ia.getchunk()
                     
                     casalog.post('Created maskThreshold mask')
-                elif len(np.shape(mask))==1 and dummy==2:
+                elif len(np.shape(mask))==1 and dummy==4:
                     casalog.post('Error in immath, select a smaller image')
                     raise Exception
                 else:
