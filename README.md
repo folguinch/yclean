@@ -15,6 +15,11 @@ The current version has been tested with:
 - `spectral-cube` 0.6.0
 - `dask` 2021.04.1
 
+Optional dependencies:
+
+- `dask-image`: recommended for large cubes.
+- `psutil`: for additional feedback on the resources (memory) used during mask making function.
+
 ## Running YCLEAN
 
 To run YCLEAN, import the `yclean` function into your script:
