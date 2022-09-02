@@ -47,7 +47,8 @@ def get_stats(cube: SpectralCube,
                                             ignore_nan=True)
 
     # Residual stats and SNR
-    new_residual_max = residual.max() * cube.unit
+    aux = residual.minimal_subcube()
+    new_residual_max = np.nanmax(aux.unmasked_data[:]) * cube.unit
     if residual_max is None or new_residual_max <= residual_max:
         residual_max = new_residual_max
     else:
