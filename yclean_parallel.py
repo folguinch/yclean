@@ -159,9 +159,11 @@ def yclean(vis: Path,
 
         # Run tclean
         tclean_args.update({'parallel': True,
-                            'niter': 100000,
+                            'niter': 1000000,
                             'threshold': threshold,
                             'startmodel': '',
+                            'calcpsf': False,
+                            'calcres': False,
                             'mask': str(new_mask_name)})
         tclean_parallel(vis, Path(f'{imagename}.tc0'), nproc, tclean_args)
 
@@ -194,7 +196,7 @@ def yclean(vis: Path,
                                           beam_fraction=0.5,
                                           use_residual=True,
                                           previous_mask=cumulative_mask,
-                                          dilate=1)
+                                          dilate=2)
 
     # Last clean
     try:
@@ -208,6 +210,8 @@ def yclean(vis: Path,
                         'niter': 1000000,
                         'threshold': threshold,
                         'startmodel': '',
+                        'calcpsf': False,
+                        'calcres': False,
                         'mask': str(new_mask_name),
                         'pblimit': 0.1})
     tclean_parallel(vis, Path(f'{imagename}.tc0'), nproc, tclean_args)

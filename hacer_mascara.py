@@ -15,7 +15,7 @@ try:
 except ImportError:
     psutil = None
 try:
-    from dask_image import ndmeasure, ndmorp
+    from dask_image import ndmorph
 except ImportError:
     ndmeasure = ndmorp = None
 
@@ -65,18 +65,10 @@ def remove_small_masks(mask: Array,
     log(f'Percentage of RAM: {psutil.virtual_memory().percent}')
     log(f'Beam area range: {np.min(beams)} - {np.max(beams)}')
     log(f'Number of unique beams: {len(unique_beams)}')
-    #mask_array = mask.compute()
 
     # Label mask
-    #structure = ndimg.generate_binary_structure(mask_array.ndim, 1)
     structure = ndimg.generate_binary_structure(mask.ndim, 1)
-    #labels, nlabels = ndimg.label(mask_array, structure=structure)
-    if ndmeasure is not None:
-        log('Using Dask optimized functions')
-        labels, nlabels = ndmeasure.label(mask, structure=structure)
-        nlabels = nlabels.compute()
-    else:
-        labels, nlabels = ndimg.label(mask, structure=structure)
+    labels, nlabels = ndimg.label(mask, structure=structure)
     component_sizes = np.bincount(labels.ravel())
     log(f'Labeled {nlabels} mask structures')
     if psutil is not None:
@@ -94,38 +86,28 @@ def remove_small_masks(mask: Array,
              f'with beam area: {beam} pixels'))
 
         # Filter small
-        #small = component_sizes < beam * beam_fraction
         small_mask = component_sizes < beam * beam_fraction
-        if ndmeasure is not None:
-            small_mask = small_mask[labels.ravel().compute()]
-            small_mask = small_mask.reshape(labels.shape)
-        else:
-            small_mask = small_mask[labels]
+        small_mask = small_mask[labels]
         # pylint: disable=E1130
         small_mask[~ind] = False
         log(f'Fitered out {np.sum(small_mask)} pixels in small masks')
+        new_mask[small_mask.ravel()] = False
         if psutil is not None:
             log(f'Percentage of RAM: {psutil.virtual_memory().percent}')
-        #mask_array[small_mask] = False
-        new_mask[small_mask.ravel().compute()] = False
     new_mask = new_mask.reshape(mask.shape)
-    del small_mask
 
     # Dilate
     if dilate is not None and dilate > 0:
         log(f'Dilating mask {dilate} iteration(s)')
-        #mask_array = ndimg.binary_dilation(mask_array, structure=structure,
-        #                                   iterations=dilate)
-    if psutil is not None:
-        log(f'Percentage of RAM: {psutil.virtual_memory().percent}')
+        if psutil is not None:
+            log(f'Percentage of RAM: {psutil.virtual_memory().percent}')
         if ndmorp is not None:
             new_mask = ndmorph.binary_dilation(new_mask, structure=structure,
-                                               iterations=2)
+                                               iterations=dilate)
         else:
             new_mask = ndimg.binary_dilation(new_mask, structure=structure,
-                                             iterations=2)
+                                             iterations=dilate)
 
-    #return da.from_array(mask_array, chunks=mask.chunks)
     return new_mask
 
 def make_threshold_mask(cube: SpectralCube,
