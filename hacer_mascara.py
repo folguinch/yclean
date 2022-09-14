@@ -17,7 +17,7 @@ except ImportError:
 try:
     from dask_image import ndmorph
 except ImportError:
-    ndmeasure = ndmorp = None
+    ndmeasure = ndmorph = None
 
 Array = TypeVar('Array', dask.array.core.Array, np.array)
 
@@ -101,7 +101,7 @@ def remove_small_masks(mask: Array,
         log(f'Dilating mask {dilate} iteration(s)')
         if psutil is not None:
             log(f'Percentage of RAM: {psutil.virtual_memory().percent}')
-        if ndmorp is not None:
+        if ndmorph is not None:
             new_mask = ndmorph.binary_dilation(new_mask, structure=structure,
                                                iterations=dilate)
         else:
@@ -179,5 +179,15 @@ def make_threshold_mask(cube: SpectralCube,
         # Write mask
         log('Writing mask')
         write_mask(mask, cube, output_mask)
+
+    return mask
+
+def open_mask(mask_name: Path):
+    """Open a mask and load the array."""
+    mask = SpectralCube.read(mask_name, use_dask=True, format='casa')
+    mask.allow_huge_operations = True
+    mask.use_dask_scheduler('threads', num_workers=12)
+    mask = mask.unmasked_data[:].value
+    mask = da.from_array(mask.astype(bool), chunks='auto')
 
     return mask

@@ -16,7 +16,7 @@ import astropy.units as u
 import numpy as np
 
 # Import local modules
-from .hacer_mascara import make_threshold_mask
+from .hacer_mascara import make_threshold_mask, open_mask
 from .utils import (load_images, tclean_parallel, common_beam_cube,
                     second_max_local)
 
@@ -65,6 +65,8 @@ def yclean(vis: Path,
            min_limit_level: float = 1.5,
            iter_limit: int = 10,
            common_beam: bool = False,
+           resume: bool = False,
+           full: bool = False,
            log: Callable = casalog.post,
            **tclean_args) -> Tuple[Path]:
     """Automatic CLEANing.
@@ -82,6 +84,8 @@ def yclean(vis: Path,
       min_limit_level: optional; minimum SNR limit level.
       iter_limit: optional; maximum number of yclean iterations.
       common_beam: optional; calculate common beam cube?
+      resume: optional; resume computations.
+      full: optional; store intermediate steps images and masks?
       log: optional; logging function.
       tclean_args: arguments for `tclean`.
 
@@ -131,6 +135,19 @@ def yclean(vis: Path,
             break
         it += 1
 
+        # Resume
+        new_mask_name = mask_dir / f'{imagename.name}.tc{it-1}.mask'
+        if resume and new_mask_name.is_dir():
+            log(f'Iter {it}: Skipping iteration')
+            continue
+        elif resume and it > 1 and not new_mask_name.is_dir():
+            log(f'Resuming at iteration: {it}')
+            cumulative_mask =  mask_dir / f'{imagename.name}.tc{it-2}.mask'
+            log(f'Iter {it}: Loading previous mask: {cumulative_mask}')
+            cumulative_mask = open_mask(cumulative_mask)
+        else:
+            pass
+
         # Some logging
         log((f'Iter {it}: SNR of Maximum Residual: '
              f'{limit_level_snr/secondary_lobe_level}'))
@@ -150,7 +167,6 @@ def yclean(vis: Path,
 
         # The masks are defined based on the previous image and residuals
         os.system(f'rm -rf {mask_name}')
-        new_mask_name = mask_dir / f'{imagename.name}.tc{it-1}.mask'
         cumulative_mask = make_threshold_mask(cube, residual, pbmap,
                                               masklevel, new_mask_name,
                                               beam_fraction=0.5,
@@ -168,7 +184,10 @@ def yclean(vis: Path,
         tclean_parallel(vis, Path(f'{imagename}.tc0'), nproc, tclean_args)
 
         # Load new images
-        export_to = Path(f'{imagename}.tc_{it}.image')
+        if full:
+            export_to = Path(f'{imagename}.tc_{it}.image')
+        else:
+            export_to = None
         cube, residual = load_images(work_img, export_to=export_to, log=log)
 
         # New stats
@@ -182,6 +201,11 @@ def yclean(vis: Path,
         if residual_max is None:
             log('Residual maximum increased, breaking ...')
             break
+
+        # Delete old masks
+        if not full and it > 2:
+            old_mask = mask_dir / f'{imagename.name}.tc{it-3}.mask'
+            os.system(f'rm -rf {old_mask} {old_mask}.fits')
 
     # Calculate a final 3*sigma mask
     log('Main iteration cycle done')
@@ -219,10 +243,13 @@ def yclean(vis: Path,
     # Export FITS
     export_to = Path(f'{imagename}.tc_final.image')
     cube, _ = load_images(work_img, load=('image', 'pb'), export_to=export_to,
-                           log=log)
+                          log=log)
     if common_beam:
         common_beam_cube(cube,
                          export_to.with_suffix('.common_beam.image.fits'),
                          log=log)
+
+    # Clean up masks
+    os.system(f'rm -rf {mask_dir}/*.mask')
 
     return work_img, export_to.with_suffix('.image.fits')
