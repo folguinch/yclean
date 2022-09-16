@@ -207,9 +207,16 @@ def yclean(vis: Path,
             old_mask = mask_dir / f'{imagename.name}.tc{it-3}.mask'
             os.system(f'rm -rf {old_mask} {old_mask}.fits')
 
+    # Re-open previous mask if jump here
+    it += 1
+    if resume and cumulative_mask is None:
+        log(f'Resuming at iteration: final')
+        cumulative_mask =  mask_dir / f'{imagename.name}.tc{it-2}.mask'
+        log(f'Iter final: Loading previous mask: {cumulative_mask}')
+        cumulative_mask = open_mask(cumulative_mask)
+
     # Calculate a final 3*sigma mask
     log('Main iteration cycle done')
-    it += 1
     os.system(f'rm -rf {mask_name}')
     new_mask_name = mask_dir / f'{imagename.name}.tc{it-1}.mask'
     masklevel = 3. * rms
