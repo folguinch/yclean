@@ -126,6 +126,19 @@ def yclean(vis: Path,
     log(f'Residual maxmimum: {residual_max}')
     log(f'Limit level SNR: {limit_level_snr}')
 
+    # Check for resume
+    mask_contents = mask_dir.glob(f'{imagename.name}.tc*.mask.fits')
+    mask_contents = list(map(str, mask_contents))
+    if resume and len(mask_contents) != 0:
+        for i in range(0, iter_limit+1):
+            aux_mask_name = mask_dir / f'{imagename.name}.tc{i}.mask.fits'
+            if str(aux_mask_name) in mask_contents:
+                min_it = i
+                log('Lowest mask iteration number: tc{min_it}')
+                break
+    else:
+        min_it = -1
+
     # Incremental step
     it = 0
     cumulative_mask = None
@@ -138,6 +151,9 @@ def yclean(vis: Path,
         # Resume
         new_mask_name = mask_dir / f'{imagename.name}.tc{it-1}.mask'
         if resume and new_mask_name.is_dir():
+            log(f'Iter {it}: Skipping iteration')
+            continue
+        elif resume and it <= min_it:
             log(f'Iter {it}: Skipping iteration')
             continue
         elif resume and it > 1 and not new_mask_name.is_dir():
