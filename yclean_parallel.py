@@ -134,7 +134,7 @@ def yclean(vis: Path,
             aux_mask_name = mask_dir / f'{imagename.name}.tc{i}.mask.fits'
             if str(aux_mask_name) in mask_contents:
                 min_it = i
-                log('Lowest mask iteration number: tc{min_it}')
+                log(f'Lowest mask iteration number: tc{min_it}')
                 break
     else:
         min_it = -1
