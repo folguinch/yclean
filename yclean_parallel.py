@@ -55,9 +55,42 @@ def get_stats(cube: SpectralCube,
         return rms, None, None
 
     # Limit level
+    residual_max = residual_max.to(rms.unit)
     limit_level_snr = residual_max / rms * secondary_lobe_level
 
     return rms, residual_max, limit_level_snr
+
+def get_threshold(limit_level_snr: u.Quantity, residual_max: u.Quantity,
+                  rms: u.Quantity, log: Callable = casalog.post) -> str:
+    """Calculate the `tclean` threshold.
+
+    We use an arctan function normalized so a secondary lobe level of 0.2 will
+    result in a threshold of `0.4*residual_max`.
+
+    Args:
+      limit_level_snr: limit level SNR.
+      residual_max: maximum of the residual.
+      rms: root mean squared.
+      log: optional; logging function.
+    """
+    # Get original value
+    limit_level = limit_level_snr * rms
+    secondary_lobe_level = limit_level / residual_max
+    if not secondary_lobe_level.is_equivalent(u.Unit(1)):
+        raise ValueError(('There is a problem with units: '
+                          f'{secondary_lobe_level}'))
+
+    # Determine peak scaling factor
+    scaling_factor = 0.4 + np.arctan(secondary_lobe_level - 0.2)
+    log(f'Scaling residual peak by: {scaling_factor}')
+
+    # Calculate threshold
+    #rms_mjy = rms.to(u.mJy/u.beam)
+    #threshold = f'{2*limit_level_snr*rms_mjy.value}mJy'
+    threshold = scaling_factor * residual_max
+    threshold = threshold.to(u.mJy/u.beam)
+
+    return f'{threshold.value}mJy'
 
 def yclean(vis: Path,
            imagename: str,
@@ -177,8 +210,7 @@ def yclean(vis: Path,
         log(f'Iter {it}: SNR of masklevel: {masklevel/rms}')
 
         # Clean threshold
-        rms_mjy = rms.to(u.mJy/u.beam)
-        threshold = f'{2*limit_level_snr*rms_mjy.value}mJy'
+        threshold = get_threshold(limit_level_snr, residual_max, rms, log=log)
         log(f'Iter {it}: Threshold: {threshold}')
 
         # The masks are defined based on the previous image and residuals
