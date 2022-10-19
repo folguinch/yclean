@@ -76,7 +76,7 @@ def get_threshold(limit_level_snr: u.Quantity, residual_max: u.Quantity,
     # Get original value
     limit_level = limit_level_snr * rms
     secondary_lobe_level = limit_level / residual_max
-    if not secondary_lobe_level.is_equivalent(u.Unit(1)):
+    if not secondary_lobe_level.unit.is_equivalent(u.Unit(1)):
         raise ValueError(('There is a problem with units: '
                           f'{secondary_lobe_level}'))
 
