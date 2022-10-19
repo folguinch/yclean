@@ -81,7 +81,7 @@ def get_threshold(limit_level_snr: u.Quantity, residual_max: u.Quantity,
                           f'{secondary_lobe_level}'))
 
     # Determine peak scaling factor
-    scaling_factor = 0.4 + np.arctan(secondary_lobe_level - 0.2)
+    scaling_factor = 0.4 + np.arctan(secondary_lobe_level.value - 0.2)
     log(f'Scaling residual peak by: {scaling_factor}')
 
     # Calculate threshold
