@@ -16,6 +16,7 @@ import numpy as np
 def load_images(imagename: Path,
                 load: Sequence[str] = ('image', 'residual'),
                 export_to: Optional[Path] = None,
+                import_format: str = 'casa',
                 log: Callable = casalog.post) -> Tuple[SpectralCube]:
     """Load images into `SpectralCube` objects.
 
@@ -23,6 +24,7 @@ def load_images(imagename: Path,
       imagename: name of the image (ending with `.image`).
       load: optional; type of files to load.
       export_to: optional; same as `imagename` but to write FITS to.
+      import_format: optional; format of the input images.
       log: optional; logging function.
 
     Returns:
@@ -37,7 +39,7 @@ def load_images(imagename: Path,
             log(f'Exporting {imtype} to FITS')
             fitsname = export_to.with_suffix(f'.{imtype}.fits')
             exportfits(imagename=str(name), fitsimage=str(fitsname))
-        image = SpectralCube.read(name, use_dask=True, format='casa')
+        image = SpectralCube.read(name, use_dask=True, format=import_format)
         image.allow_huge_operations = True
         image.use_dask_scheduler('threads', num_workers=12)
         images.append(image)
@@ -126,3 +128,39 @@ def common_beam_cube(cube: SpectralCube, filename: Path,
                                 allow_huge=True)
     new_cube = new_cube.minimal_subcube(spatial_only=True)
     new_cube.write(filename)
+
+def pb_crop_fits(pbmap: SpectralCube,
+                 level: float,
+                 fitsbase: Path,
+                 load: Sequence[str],
+                 log: Callable = print) -> None:
+    """Crop a cube from a pb level.
+
+    This function assumes all images have the same dimenssions.
+
+    Args:
+      pbmap: the pb map.
+      level: pb cut level.
+      fitsbase: the base filename for the fits file (without `fits` extension).
+      load: images to crop.
+      log: optional; logging function.
+    """
+    cube_slice = None
+    for imtype in load:
+        # File names
+        log(f'Loading image type: {imtype}')
+        fitsname = fitsbase.with_suffix(f'.{imtype}.fits')
+        outname = fitsbase.with_suffix(f'.{imtype}.pbcropped.fits')
+
+        # Open map
+        cube = SpectralCube.read(fitsname, use_dask=True)
+        cube.allow_huge_operations = True
+        cube.use_dask_scheduler('threads', num_workers=12)
+        if cube_slice is None:
+            cube_slice = cube.subcube_slices_from_mask(pbmap > level,
+                                                       spatial_only=True)
+        cube = cube[cube_slice]
+
+        # Store
+        log(f'Saving cropped image: {outname}')
+        cube.write(outname)

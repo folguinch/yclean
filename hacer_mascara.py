@@ -167,14 +167,25 @@ def make_threshold_mask(cube: SpectralCube,
         mask = mask.include()
 
         # Join with previous mask
+        log(f'Inital valid data in mask: {mask.sum().compute()}')
         if previous_mask is not None:
             log('Combining masks')
             mask = mask | previous_mask
+            log(f'Valid data after combining masks: {mask.sum().compute()}')
 
         # Filter out small mask pieces
         log('Removing small masks')
         mask = remove_small_masks(mask, cube.pixels_per_beam, beam_fraction,
                                   dilate=dilate, log=log)
+        log(f'Final number of valid data: {mask.sum().compute()}')
+        
+        # Maximum residual within mask
+        #max_residual = np.nanmax(residual[mask]) / residual.unit * cube.unit
+        #log(('Maximum residual within mask: '
+        #     f'{max_residual:.3e} {max_residual.unit}'))
+        #max_residual = np.nanargmax(residual)
+        #ind_max = np.unravel_index(max_residual, residual.shape)
+        #log(f'Max residual in mask: {mask[ind_max]}')
 
         # Write mask
         log('Writing mask')
