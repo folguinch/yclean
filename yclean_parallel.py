@@ -52,11 +52,13 @@ def get_stats(cube: SpectralCube,
 
     # Residual stats and SNR
     #aux = residual.minimal_subcube()
-    ind = np.ones(len(residual.spectral_axis), dtype=bool)
-    ind[:5] = False
-    ind[-5:] = False
-    residual_masked = residual.mask_channels(ind)
-    new_residual_max = np.nanmax(residual_masked.filled_data[:]) * cube.unit
+    #ind = np.ones(len(residual.spectral_axis), dtype=bool)
+    #ind[:5] = False
+    #ind[-5:] = False
+    #residual_masked = residual.mask_channels(ind)
+    #new_residual_max = np.nanmax(residual_masked.filled_data[:]) * cube.unit
+    aux = residual[5:-5]
+    new_residual_max = np.nanmax(aux.unmasked_data[:]) * cube.unit
     log(f'Residual maximum: {new_residual_max.value:.3e} {new_residual_max.unit}')
     if residual_max is None or new_residual_max <= residual_max:
         residual_max = new_residual_max
@@ -64,8 +66,8 @@ def get_stats(cube: SpectralCube,
         return rms, None, None
 
     # For test
-    residual_max_pos = np.nanargmax(residual_masked.filled_data[:])
-    residual_max_pos = np.unravel_index(residual_max_pos, residual_masked.shape)
+    residual_max_pos = np.nanargmax(aux.unmasked_data[:])
+    residual_max_pos = np.unravel_index(residual_max_pos, aux.shape)
     log(f'Position of residual maximum: {residual_max_pos}')
 
     # Limit level
@@ -353,17 +355,17 @@ def yclean(vis: Path,
                          log=log)
 
     # Final stats
-    residual = load_images(work_img, load=('residual',), log=log)[0]
-    rms, residual_max, *_ = get_stats(
-        cube,
-        residual,
-        secondary_lobe_level,
-        planes=(2, 9),
-        log=log
-    )
-    ax.plot(it, residual_max.value, 'ro')
-    ax2.plot(it, rms.value, 'bx')
-    fig.savefig(f'{imagename}.stats.png')
+    #residual = load_images(work_img, load=('residual',), log=log)[0]
+    #rms, residual_max, *_ = get_stats(
+    #    cube,
+    #    residual,
+    #    secondary_lobe_level,
+    #    planes=(2, 9),
+    #    log=log
+    #)
+    #ax.plot(it, residual_max.value, 'ro')
+    #ax2.plot(it, rms.value, 'bx')
+    #fig.savefig(f'{imagename}.stats.png')
 
     # Crop image? Shouldn't be used with cubes that will be joined
     if pb_crop_level is not None:
