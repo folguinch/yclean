@@ -63,7 +63,7 @@ def get_stats(cube: SpectralCube,
     if residual_max is None or new_residual_max <= residual_max:
         residual_max = new_residual_max
     else:
-        return rms, None, None
+        return rms, None, None, None
 
     # For test
     residual_max_pos = np.nanargmax(aux.unmasked_data[:])
