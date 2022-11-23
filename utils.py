@@ -166,8 +166,8 @@ def pb_crop_fits(pbmap: SpectralCube,
         cube.write(outname)
 
 def store_stats(filename: Path,
-                fmts: Optional[dict] = None
-                *stats) -> None:
+                stats: Sequence,
+                fmts: Optional[dict] = None) -> None:
     """Write statistics to disk."""
     if fmts is None:
         fmts = {

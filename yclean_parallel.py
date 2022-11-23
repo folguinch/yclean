@@ -210,7 +210,7 @@ def yclean(vis: Path,
               'mask_combined': 0,
               'mask_final': 0},
              )
-    store_stats(imagename.parent / 'statistics.dat', *stats)
+    store_stats(imagename.parent / 'statistics.dat', stats)
     cumulative_mask = None
     while limit_level_snr > min_limit_level:
         # Iteration limit
