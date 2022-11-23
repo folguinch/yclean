@@ -164,3 +164,24 @@ def pb_crop_fits(pbmap: SpectralCube,
         # Store
         log(f'Saving cropped image: {outname}')
         cube.write(outname)
+
+def store_stats(filename: Path,
+                fmts: Optional[dict] = None
+                *stats) -> None:
+    """Write statistics to disk."""
+    if fmts is None:
+        fmts = {
+            'it': '',
+            'rms': '.value:.3e',
+            'residual_max': '.value:.3e',
+            'residual_max_pos': '',
+            'threshold': '',
+            'mask_level': '.value:.3e',
+            'mask_initial': '',
+            'mask_combined': '',
+            'mask_final': '',
+        }
+    header = ['#' + '\t'.join(fmts.keys())]
+    fmt = '\t'.join(f'{{{key}{val}}}' for key, val in fmts.items())
+    lines = '\n'.join(header + [fmt.format(**line) for line in stats])
+    filename.write_text(lines)

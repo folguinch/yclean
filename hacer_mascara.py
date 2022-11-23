@@ -148,6 +148,7 @@ def make_threshold_mask(cube: SpectralCube,
 
     Returns:
       A binary mask.
+      A dictionary with mask statistics.
 
     Notes:
       Version 28 Dic 2017.
@@ -163,35 +164,32 @@ def make_threshold_mask(cube: SpectralCube,
         mask = (pbmap > 0.2*pbmap.unit) & (cube > mask_threshold)
 
     # Operate over dask mask
+    stats = {}
     with dask.config.set(**{'array.slicing.split_large_chunks': False}):
         mask = mask.include()
 
         # Join with previous mask
-        log(f'Inital valid data in mask: {mask.sum().compute()}')
+        stats['mask_initial'] = np.sum(mask.compute())
+        log(f"Inital valid data in mask: {stats['mask_initial']}")
         if previous_mask is not None:
             log('Combining masks')
+            log(f'Previous mask valid data: {np.sum(previous_mask.compute())}')
             mask = mask | previous_mask
-            log(f'Valid data after combining masks: {mask.sum().compute()}')
+            stats['mask_combined'] = np.sum(mask.compute())
+            log(f"Valid data after combining masks: {stats['mask_combined']}")
 
         # Filter out small mask pieces
         log('Removing small masks')
         mask = remove_small_masks(mask, cube.pixels_per_beam, beam_fraction,
                                   dilate=dilate, log=log)
-        log(f'Final number of valid data: {mask.sum().compute()}')
+        stats['mask_final'] = np.sum(mask.compute())
+        log(f"Final number of valid data: {stats['mask_final']}")
         
-        # Maximum residual within mask
-        #max_residual = np.nanmax(residual[mask]) / residual.unit * cube.unit
-        #log(('Maximum residual within mask: '
-        #     f'{max_residual:.3e} {max_residual.unit}'))
-        #max_residual = np.nanargmax(residual)
-        #ind_max = np.unravel_index(max_residual, residual.shape)
-        #log(f'Max residual in mask: {mask[ind_max]}')
-
         # Write mask
         log('Writing mask')
         write_mask(mask, cube, output_mask)
 
-    return mask
+    return mask, stats
 
 def open_mask(mask_name: Path):
     """Open a mask and load the array."""

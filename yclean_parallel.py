@@ -13,13 +13,12 @@ from astropy import stats
 from casatasks import casalog
 from spectral_cube import SpectralCube
 import astropy.units as u
-import matplotlib.pyplot as plt
 import numpy as np
 
 # Import local modules
 from .hacer_mascara import make_threshold_mask, open_mask
 from .utils import (load_images, tclean_parallel, common_beam_cube,
-                    second_max_local, pb_crop_fits)
+                    second_max_local, pb_crop_fits, store_stats)
 
 def get_stats(cube: SpectralCube,
               residual: SpectralCube,
@@ -199,17 +198,19 @@ def yclean(vis: Path,
     else:
         min_it = -1
 
-    # For test
-    fig, ax = plt.subplots()
-    ax2 = ax.twinx()
-    ax.set_xlabel('Iteration')
-    ax.set_ylabel(f'Residual max ({residual_max.unit})', color='r')
-    ax2.set_ylabel(f'rms ({rms.unit})', color='b')
-
     # Incremental step
     it = 0
-    ax.plot(it, residual_max.value, 'ro')
-    ax2.plot(it, rms.value, 'bx')
+    stats = ({'it': it,
+              'rms': rms,
+              'residual_max': residual_max,
+              'residual_max_pos': residual_max_pos,
+              'threshold': 'none',
+              'mask_level': 0 * rms.unit,
+              'mask_initial': 0,
+              'mask_combined': 0,
+              'mask_final': 0},
+             )
+    store_stats(imagename.parent / 'statistics.dat', *stats)
     cumulative_mask = None
     while limit_level_snr > min_limit_level:
         # Iteration limit
@@ -252,11 +253,16 @@ def yclean(vis: Path,
 
         # The masks are defined based on the previous image and residuals
         os.system(f'rm -rf {mask_name}')
-        cumulative_mask = make_threshold_mask(cube, residual, pbmap,
-                                              masklevel, new_mask_name,
-                                              beam_fraction=0.5,
-                                              use_residual=True,
-                                              previous_mask=cumulative_mask)
+        cumulative_mask, stats = make_threshold_mask(
+            cube,
+            residual,
+            pbmap,
+            masklevel,
+            new_mask_name,
+            beam_fraction=0.5,
+            use_residual=True,
+            previous_mask=cumulative_mask,
+        )
         log(('Max residual in mask: '
              f'{cumulative_mask[residual_max_pos].compute()}'))
 
@@ -289,8 +295,6 @@ def yclean(vis: Path,
         if residual_max is None:
             log('Residual maximum increased, breaking ...')
             break
-        ax.plot(it, residual_max.value, 'ro')
-        ax2.plot(it, rms.value, 'bx')
 
         # Delete old masks
         if not full and it > 2:
@@ -313,12 +317,12 @@ def yclean(vis: Path,
     log(f'Final mask level: {masklevel.value:.3e} {masklevel.unit}')
     # The mask is dilated 1 pixel in each direction, the original code dilates
     # only in the spectral direction
-    cumulative_mask = make_threshold_mask(cube, residual, pbmap,
-                                          masklevel, new_mask_name,
-                                          beam_fraction=0.5,
-                                          use_residual=True,
-                                          previous_mask=cumulative_mask,
-                                          dilate=2)
+    cumulative_mask, stats = make_threshold_mask(cube, residual, pbmap,
+                                                 masklevel, new_mask_name,
+                                                 beam_fraction=0.5,
+                                                 use_residual=True,
+                                                 previous_mask=cumulative_mask,
+                                                 dilate=2)
 
     # Last clean
     try:
@@ -355,17 +359,14 @@ def yclean(vis: Path,
                          log=log)
 
     # Final stats
-    #residual = load_images(work_img, load=('residual',), log=log)[0]
-    #rms, residual_max, *_ = get_stats(
-    #    cube,
-    #    residual,
-    #    secondary_lobe_level,
-    #    planes=(2, 9),
-    #    log=log
-    #)
-    #ax.plot(it, residual_max.value, 'ro')
-    #ax2.plot(it, rms.value, 'bx')
-    #fig.savefig(f'{imagename}.stats.png')
+    residual = load_images(work_img, load=('residual',), log=log)[0]
+    rms, residual_max, residual_max_pos, *_ = get_stats(
+        cube,
+        residual,
+        secondary_lobe_level,
+        planes=(2, 9),
+        log=log
+    )
 
     # Crop image? Shouldn't be used with cubes that will be joined
     if pb_crop_level is not None:
