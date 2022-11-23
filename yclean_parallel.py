@@ -54,7 +54,7 @@ def get_stats(cube: SpectralCube,
     # Residual stats and SNR
     aux = residual[ignore_borders:-ignore_borders]
     residual_max = np.nanmax(aux.unmasked_data[:]) * cube.unit
-    log(f'Residual maximum: {new_residual_max.value:.3e} {new_residual_max.unit}')
+    log(f'Residual maximum: {residual_max.value:.3e} {residual_max.unit}')
     #if residual_max is None or new_residual_max <= residual_max:
     #    residual_max = new_residual_max
     #else:
@@ -99,7 +99,7 @@ def get_threshold(limit_level_snr: u.Quantity, residual_max: u.Quantity,
 
     # Calculate threshold
     #rms_mjy = rms.to(u.mJy/u.beam)
-    #threshold = f'{2*limit_level_snr*rms_mjy.value}mJy'
+    # original form: threshold = f'{2*limit_level_snr*rms_mjy.value}mJy'
     threshold = scaling_factor * residual_max
     threshold = threshold.to(u.mJy/u.beam)
 
