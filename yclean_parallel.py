@@ -23,8 +23,9 @@ from .utils import (load_images, tclean_parallel, common_beam_cube,
 def get_stats(cube: SpectralCube,
               residual: SpectralCube,
               secondary_lobe_level: float,
-              residual_max: Optional[u.Quantity] = None,
+              #residual_max: Optional[u.Quantity] = None,
               planes: Tuple[int] = (2, 8),
+              ignore_borders: int = 5,
               log: Callable = print) -> tuple:
     """Calculate image statistics (rms, max, limits).
 
@@ -34,6 +35,7 @@ def get_stats(cube: SpectralCube,
       secondary_lobe_level: secondary lobe level.
       residual_max: optional; residual maximum value from previous iterations.
       planes: optional; channel percentiles where statistics are measured.
+      ignore_borders: optional; ignore this number of border channels.
       log: optional; logging function.
 
     Returns:
@@ -50,23 +52,19 @@ def get_stats(cube: SpectralCube,
     log(f'Image rms: {rms.value:.3e} {rms.unit}')
 
     # Residual stats and SNR
-    #aux = residual.minimal_subcube()
-    #ind = np.ones(len(residual.spectral_axis), dtype=bool)
-    #ind[:5] = False
-    #ind[-5:] = False
-    #residual_masked = residual.mask_channels(ind)
-    #new_residual_max = np.nanmax(residual_masked.filled_data[:]) * cube.unit
-    aux = residual[5:-5]
-    new_residual_max = np.nanmax(aux.unmasked_data[:]) * cube.unit
+    aux = residual[ignore_borders:-ignore_borders]
+    residual_max = np.nanmax(aux.unmasked_data[:]) * cube.unit
     log(f'Residual maximum: {new_residual_max.value:.3e} {new_residual_max.unit}')
-    if residual_max is None or new_residual_max <= residual_max:
-        residual_max = new_residual_max
-    else:
-        return rms, None, None, None
+    #if residual_max is None or new_residual_max <= residual_max:
+    #    residual_max = new_residual_max
+    #else:
+    #    return rms, None, None, None
 
-    # For test
+    # Position of maximum
     residual_max_pos = np.nanargmax(aux.unmasked_data[:])
     residual_max_pos = np.unravel_index(residual_max_pos, aux.shape)
+    residual_max_pos = (residual_max_pos[0] + ignore_borders,) + \
+            residual_max_pos[1:]
     log(f'Position of residual maximum: {residual_max_pos}')
 
     # Limit level
@@ -210,8 +208,8 @@ def yclean(vis: Path,
               'mask_combined': 0,
               'mask_final': 0},
              )
-    store_stats(imagename.parent / 'statistics.dat', stats)
     cumulative_mask = None
+    old_residual_max = residual_max
     while limit_level_snr > min_limit_level:
         # Iteration limit
         if it > iter_limit:
@@ -253,7 +251,7 @@ def yclean(vis: Path,
 
         # The masks are defined based on the previous image and residuals
         os.system(f'rm -rf {mask_name}')
-        cumulative_mask, stats = make_threshold_mask(
+        cumulative_mask, mask_stats = make_threshold_mask(
             cube,
             residual,
             pbmap,
@@ -292,7 +290,14 @@ def yclean(vis: Path,
             planes=(2, 9),
             log=log
         )
-        if residual_max is None:
+        sti = {'it': it, 'rms': rms, 'residual_max': residual_max,
+               'residual_max_pos': residual_max_pos, 'threshold': threshold,
+               'mask_level': masklevel}
+        sti.update(mask_stats)
+        stats += (sti,)
+        if residual_max <= old_residual_max :
+            old_residual_max = residual_max
+        else:
             log('Residual maximum increased, breaking ...')
             break
 
@@ -317,12 +322,17 @@ def yclean(vis: Path,
     log(f'Final mask level: {masklevel.value:.3e} {masklevel.unit}')
     # The mask is dilated 1 pixel in each direction, the original code dilates
     # only in the spectral direction
-    cumulative_mask, stats = make_threshold_mask(cube, residual, pbmap,
-                                                 masklevel, new_mask_name,
-                                                 beam_fraction=0.5,
-                                                 use_residual=True,
-                                                 previous_mask=cumulative_mask,
-                                                 dilate=2)
+    cumulative_mask, mask_stats = make_threshold_mask(
+        cube,
+        residual,
+        pbmap,
+        masklevel,
+        new_mask_name,
+        beam_fraction=0.5,
+        use_residual=True,
+        previous_mask=cumulative_mask,
+        dilate=2,
+    )
 
     # Last clean
     try:
@@ -367,6 +377,12 @@ def yclean(vis: Path,
         planes=(2, 9),
         log=log
     )
+    sti = {'it': it, 'rms': rms, 'residual_max': residual_max,
+           'residual_max_pos': residual_max_pos, 'threshold': threshold,
+           'mask_level': masklevel}
+    sti.update(mask_stats)
+    stats += (sti,)
+    store_stats(imagename.parent / 'statistics.dat', stats)
 
     # Crop image? Shouldn't be used with cubes that will be joined
     if pb_crop_level is not None:
