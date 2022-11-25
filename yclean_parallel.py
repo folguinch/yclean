@@ -286,7 +286,7 @@ def yclean(vis: Path,
             cube,
             residual,
             secondary_lobe_level,
-            residual_max=residual_max,
+            #residual_max=residual_max,
             planes=(2, 9),
             log=log
         )
