@@ -177,6 +177,8 @@ def make_threshold_mask(cube: SpectralCube,
             mask = mask | previous_mask
             stats['mask_combined'] = np.sum(mask.compute())
             log(f"Valid data after combining masks: {stats['mask_combined']}")
+        else:
+            stats['mask_combined'] = 0
 
         # Filter out small mask pieces
         log('Removing small masks')
