@@ -19,9 +19,114 @@ try:
 except ImportError:
     ndmeasure = ndmorph = None
 
-Array = TypeVar('Array', dask.array.core.Array, np.array)
+class IndexedMask:
+    """Store a mask by tracking `True` indices.
 
-def write_mask(mask: Array, cube: SpectralCube, output: Path) -> None:
+    Attributes:
+      indices: structured array containing the indices along each axis.
+      shape: shape of the mask.
+      origin: indices origin.
+    """
+
+    def __init__(self, indices: np.typing.ArrayLike, shape: Tuple[int],
+                 origin: Tuple[int]) -> None:
+        self.indices = indices
+        self.shape = shape
+        self.origin = origin
+
+    @classmethod
+    def from_array(cls, mask: np.typing.ArrayLike):
+        """Create an indexed mask from an array."""
+        # Get indices
+        indices = cls.indices_from_array(mask)
+
+        # Find origin and shift
+        origin = tuple(np.min(indices[field])
+                       for field in self.indices.dtype.fields)
+        #origins = tuple()
+        #for field in indices.dtype.fields:
+        #    origin = np.min(indices[field])
+        #    indices[field] = indices[field] - origin
+        #    origins += (origin,)
+
+        return cls(indices, mask.shape, origin)
+
+    @property
+    def size(self) -> int:
+        return len(self.indices)
+
+    @staticmethod
+    def indices_from_array(mask: np.typing.ArrayLike,
+                           dtype='int32') -> np.typing.ArrayLike:
+        """Get mask indices from mask array."""
+        indices = np.nonzero(mask)
+        indices = np.array(list(zip(*indices)),
+                           dtype=[('i', dtype),
+                                  ('j', dtype),
+                                  ('k', dtype)])
+        if (np.any(indices['i'] < 0) or np.any(indices['j'] < 0) or
+            np.any(indices['k'] < 0)):
+            raise ValueError(f'Wrong dtype: {dtype}')
+
+        return indices
+
+    def update_to(self, mask: np.typing.ArrayLike,
+                  shift_back: bool = False) -> None:
+        """Replace the indices using input mask."""
+        self.indices = indices_from_array(mask)
+
+        if shift_back:
+            self.shift_back()
+
+    def merge_with(self, mask: IndexedMask) -> None:
+        """Union of 2 masks."""
+        indices = np.concatenate((self.indices, mask.indices))
+        self.indices = np.array(list(set(map(tuple, indices))),
+                                dtype=self.indices.dtype)
+
+    def shift_to_origin(self):
+        """Shift indices so origin is zero."""
+        for i, field in enumerate(self.indices.dtype.fields):
+            self.indices[field] = self.indices[field] - self.origin[i]
+
+    def shift_back(self):
+        """Shift indices so origin is the origin back to original mask."""
+        for i, field in enumerate(self.indices.dtype.fields):
+            self.indices[field] = self.indices[field] + self.origin[i]
+
+    def get_max(self, shift: int = 0) -> Tuple[int]:
+        """Get the maximum along each field."""
+        return tuple(np.max(self.indices[field]) + shift
+                     for field in self.indices.dtype.fields)
+
+    def minimal_mask(self, shift_to_origin: bool = False) -> np.typing.ArrayLike:
+        """Return a mask with the minimum shape containg all valid point."""
+        if shift_to_origin:
+            self.shift_to_origin()
+
+        # Get the shape
+        shape = get_max(shift=1)
+
+        # Generate array
+        mask = np.zeros(shape, dtype=bool)
+        mask[tuple(np.array(list(map(list, self.indices))).T)] = True
+
+        return mask
+
+    def to_array(self) -> np.typing.ArrayLike:
+        """Build a mask array."""
+        mask = np.zeros(self.shape, dtype=bool)
+        mask[tuple(np.array(list(map(list, self.indices))).T)] = True
+
+        return mask
+
+    def is_in(self, val: Tuple[int]) -> bool:
+        """Is position in mask?"""
+        return np.isin(np.array([val], dtype=self.indices.dtype)[0],
+                       self.indices)
+
+def write_mask(mask: np.typing.ArrayLike, cube: SpectralCube,
+               output: Path) -> None:
     """Write mask to disk.
 
     Args:
@@ -42,40 +147,41 @@ def write_mask(mask: Array, cube: SpectralCube, output: Path) -> None:
     importfits(fitsimage=str(fitsmask), imagename=str(output),
                defaultaxes=True, defaultaxesvalues = ['','','','I'])
 
-def remove_small_masks(mask: Array,
+def remove_small_masks(mask: IndexedMask,
                        beam_area: float,
                        beam_fraction: float,
-                       dilate: Optional[int] = None,
-                       log: Callable = casalog.post) -> Array:
+                       log: Callable = casalog.post) -> IndexedMask:
     """Remove small masks pieces.
 
     Args:
       mask: mask array.
       beam_area: beam area in pixels.
       beam_fraction: fraction of the beam area for small masks.
-      dilate: optional; number of iteration to dilate the final mask.
       log: optional; logging function.
 
     Returns:
-      A `dask` array.
+      An `IndexedMask` object.
     """
     # Some information first
     beams = np.array(beam_area, dtype=int)
-    unique_beams = np.unique(beams)
-    log(f'Percentage of RAM: {psutil.virtual_memory().percent}')
+    unique_beams, *_ = np.unique(beams)
+    if psutil is not None:
+        log(f'Percentage of RAM: {psutil.virtual_memory().percent}')
     log(f'Beam area range: {np.min(beams)} - {np.max(beams)}')
     log(f'Number of unique beams: {len(unique_beams)}')
 
     # Label mask
-    structure = ndimg.generate_binary_structure(mask.ndim, 1)
-    labels, nlabels = ndimg.label(mask, structure=structure)
+    working_mask = mask.minimal_mask(shift_to_origin=True)
+    log(f'Working mask shape: {working_mask.shape}')
+    structure = ndimg.generate_binary_structure(working_mask.ndim, 1)
+    labels, nlabels = ndimg.label(working_mask, structure=structure)
     component_sizes = np.bincount(labels.ravel())
     log(f'Labeled {nlabels} mask structures')
     if psutil is not None:
         log(f'Percentage of RAM: {psutil.virtual_memory().percent}')
 
     # Iterate over unique beam values
-    new_mask = mask.flatten()
+    #new_mask = mask.flatten()
     for beam in unique_beams:
         # Search where beam areas are equal
         ind = beams == beam
@@ -91,35 +197,27 @@ def remove_small_masks(mask: Array,
         # pylint: disable=E1130
         small_mask[~ind] = False
         log(f'Fitered out {np.sum(small_mask)} pixels in small masks')
-        new_mask[small_mask.ravel()] = False
+        #new_mask[small_mask.ravel()] = False
+        working_mask[small_mask] = False
         if psutil is not None:
             log(f'Percentage of RAM: {psutil.virtual_memory().percent}')
-    new_mask = new_mask.reshape(mask.shape)
+    #new_mask = new_mask.reshape(mask.shape)
 
-    # Dilate
-    if dilate is not None and dilate > 0:
-        log(f'Dilating mask {dilate} iteration(s)')
-        if psutil is not None:
-            log(f'Percentage of RAM: {psutil.virtual_memory().percent}')
-        if ndmorph is not None:
-            new_mask = ndmorph.binary_dilation(new_mask, structure=structure,
-                                               iterations=dilate)
-        else:
-            new_mask = ndimg.binary_dilation(new_mask, structure=structure,
-                                             iterations=dilate)
+    # Store in the mask and restore indices
+    mask.update_to(working_mask, shift_back=True)
 
-    return new_mask
+    return mask
 
 def make_threshold_mask(cube: SpectralCube,
                         residual: SpectralCube,
                         pbmap: SpectralCube,
                         mask_threshold: u.Quantity,
                         output_mask: Path,
-                        previous_mask: Optional[Array] = None,
+                        previous_mask: Optional[IndexedMask] = None,
                         beam_fraction: float = 1.,
                         dilate: Optional[int] = None,
                         use_residual: bool = True,
-                        log: Callable = casalog.post) -> Array:
+                        log: Callable = casalog.post) -> IndexedMask:
     """Creates a mask from flux threshold.
 
     The `residual` image is used if `use_residual=True`, which is the default.
@@ -163,42 +261,62 @@ def make_threshold_mask(cube: SpectralCube,
     else:
         mask = (pbmap > 0.2*pbmap.unit) & (cube > mask_threshold)
 
-    # Operate over dask mask
+    # Compute mask
     stats = {}
     with dask.config.set(**{'array.slicing.split_large_chunks': False}):
-        mask = mask.include()
+        mask = mask.include().compute()
 
-        # Join with previous mask
-        stats['mask_initial'] = np.sum(mask.compute())
-        log(f"Inital valid data in mask: {stats['mask_initial']}")
-        if previous_mask is not None:
-            log('Combining masks')
-            log(f'Previous mask valid data: {np.sum(previous_mask.compute())}')
-            mask = mask | previous_mask
-            stats['mask_combined'] = np.sum(mask.compute())
-            log(f"Valid data after combining masks: {stats['mask_combined']}")
+    # Join with previous mask
+    mask = IndexedMask.from_array(mask)
+    stats['mask_initial'] = mask.size
+    log(f"Inital valid data in mask: {stats['mask_initial']}")
+    if previous_mask is not None:
+        log('Combining masks')
+        log(f'Previous mask valid data: {previous_mask.size}')
+        mask.merge_with(previous_mask)
+        stats['mask_combined'] = mask.size
+        log(f"Valid data after combining masks: {stats['mask_combined']}")
+    else:
+        stats['mask_combined'] = mask.size
+
+    # Filter out small mask pieces
+    log('Removing small masks')
+    mask = remove_small_masks(mask, cube.pixels_per_beam, beam_fraction,
+                              dilate=dilate, log=log)
+    stats['mask_final'] = np.sum(mask.size)
+    log(f"Final number of valid data: {stats['mask_final']}")
+
+    # Build mask array
+    mask_array = mask.to_array()
+
+    # Dilate
+    if dilate is not None and dilate > 0:
+        log(f'Dilating mask {dilate} iteration(s)')
+        if psutil is not None:
+            log(f'Percentage of RAM: {psutil.virtual_memory().percent}')
+        if ndmorph is not None:
+            mask_array = ndmorph.binary_dilation(mask_array,
+                                                 structure=structure,
+                                                 iterations=dilate)
         else:
-            stats['mask_combined'] = 0
-
-        # Filter out small mask pieces
-        log('Removing small masks')
-        mask = remove_small_masks(mask, cube.pixels_per_beam, beam_fraction,
-                                  dilate=dilate, log=log)
-        stats['mask_final'] = np.sum(mask.compute())
-        log(f"Final number of valid data: {stats['mask_final']}")
-        
-        # Write mask
-        log('Writing mask')
-        write_mask(mask, cube, output_mask)
+            mask_array = ndimg.binary_dilation(mask_array,
+                                               structure=structure,
+                                               iterations=dilate)
+        mask.update_to(mask_array)
+    
+    # Write mask
+    log('Writing mask')
+    write_mask(mask_array, cube, output_mask)
 
     return mask, stats
 
 def open_mask(mask_name: Path):
     """Open a mask and load the array."""
-    mask = SpectralCube.read(mask_name, use_dask=True, format='casa')
-    mask.allow_huge_operations = True
-    mask.use_dask_scheduler('threads', num_workers=12)
-    mask = mask.unmasked_data[:].value
-    mask = da.from_array(mask.astype(bool), chunks='auto')
+    mask = SpectralCube.read(mask_name, use_dask=False, format='casa')
+    #mask.allow_huge_operations = True
+    #mask.use_dask_scheduler('threads', num_workers=12)
+    mask = mask.unmasked_data[:].value.astype(bool)
+    #mask = da.from_array(mask.astype(bool), chunks='auto')
+    mask = IndexedMask.from_array()
 
     return mask

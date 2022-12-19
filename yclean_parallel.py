@@ -262,7 +262,7 @@ def yclean(vis: Path,
             previous_mask=cumulative_mask,
         )
         log(('Max residual in mask: '
-             f'{cumulative_mask[residual_max_pos].compute()}'))
+             f'{cumulative_mask.is_in(tuple(residual_max_pos))}'))
 
         # Run tclean
         tclean_args.update({'parallel': True,
