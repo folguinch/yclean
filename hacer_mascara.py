@@ -79,7 +79,7 @@ class IndexedMask:
         if shift_back:
             self.shift_back()
 
-    def merge_with(self, mask: IndexedMask) -> None:
+    def merge_with(self, mask: 'IndexedMask') -> None:
         """Union of 2 masks."""
         indices = np.concatenate((self.indices, mask.indices))
         self.indices = np.array(list(set(map(tuple, indices))),
