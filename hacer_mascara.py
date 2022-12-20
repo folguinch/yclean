@@ -1,5 +1,5 @@
 """Tasks for creating and writing masks."""
-from typing import Optional, TypeVar, Callable
+from typing import Optional, TypeVar, Callable, Tuple
 from pathlib import Path
 
 from astropy.io import fits
