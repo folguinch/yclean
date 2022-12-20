@@ -9,6 +9,7 @@ import astropy.units as u
 import dask
 import dask.array as da
 import numpy as np
+import numpy.typing as npt
 import scipy.ndimage as ndimg
 try:
     import psutil
@@ -28,14 +29,14 @@ class IndexedMask:
       origin: indices origin.
     """
 
-    def __init__(self, indices: np.typing.ArrayLike, shape: Tuple[int],
+    def __init__(self, indices: npt.ArrayLike, shape: Tuple[int],
                  origin: Tuple[int]) -> None:
         self.indices = indices
         self.shape = shape
         self.origin = origin
 
     @classmethod
-    def from_array(cls, mask: np.typing.ArrayLike):
+    def from_array(cls, mask: npt.ArrayLike):
         """Create an indexed mask from an array."""
         # Get indices
         indices = cls.indices_from_array(mask)
@@ -56,8 +57,8 @@ class IndexedMask:
         return len(self.indices)
 
     @staticmethod
-    def indices_from_array(mask: np.typing.ArrayLike,
-                           dtype='int32') -> np.typing.ArrayLike:
+    def indices_from_array(mask: npt.ArrayLike,
+                           dtype='int32') -> npt.ArrayLike:
         """Get mask indices from mask array."""
         indices = np.nonzero(mask)
         indices = np.array(list(zip(*indices)),
@@ -70,7 +71,7 @@ class IndexedMask:
 
         return indices
 
-    def update_to(self, mask: np.typing.ArrayLike,
+    def update_to(self, mask: npt.ArrayLike,
                   shift_back: bool = False) -> None:
         """Replace the indices using input mask."""
         self.indices = indices_from_array(mask)
@@ -99,7 +100,7 @@ class IndexedMask:
         return tuple(np.max(self.indices[field]) + shift
                      for field in self.indices.dtype.fields)
 
-    def minimal_mask(self, shift_to_origin: bool = False) -> np.typing.ArrayLike:
+    def minimal_mask(self, shift_to_origin: bool = False) -> npt.ArrayLike:
         """Return a mask with the minimum shape containg all valid point."""
         if shift_to_origin:
             self.shift_to_origin()
@@ -113,7 +114,7 @@ class IndexedMask:
 
         return mask
 
-    def to_array(self) -> np.typing.ArrayLike:
+    def to_array(self) -> npt.ArrayLike:
         """Build a mask array."""
         mask = np.zeros(self.shape, dtype=bool)
         mask[tuple(np.array(list(map(list, self.indices))).T)] = True
@@ -125,7 +126,7 @@ class IndexedMask:
         return np.isin(np.array([val], dtype=self.indices.dtype)[0],
                        self.indices)
 
-def write_mask(mask: np.typing.ArrayLike, cube: SpectralCube,
+def write_mask(mask: npt.ArrayLike, cube: SpectralCube,
                output: Path) -> None:
     """Write mask to disk.
 
