@@ -319,6 +319,6 @@ def open_mask(mask_name: Path):
     #mask.use_dask_scheduler('threads', num_workers=12)
     mask = mask.unmasked_data[:].value.astype(bool)
     #mask = da.from_array(mask.astype(bool), chunks='auto')
-    mask = IndexedMask.from_array(mask.compute())
+    mask = IndexedMask.from_array(mask)
 
     return mask
