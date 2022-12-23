@@ -1,6 +1,6 @@
 """Common utilities."""
+from typing import Callable, Sequence, Tuple, Optional, Dict
 from datetime import datetime
-from typing import Callable, Sequence, Tuple, Optional
 from pathlib import Path
 import itertools
 import json
@@ -166,8 +166,8 @@ def pb_crop_fits(pbmap: SpectralCube,
         cube.write(outname)
 
 def store_stats(filename: Path,
-                stats: Sequence,
-                fmts: Optional[dict] = None) -> None:
+                stats: Dict,
+                fmts: Optional[Dict] = None) -> None:
     """Write statistics to disk."""
     if fmts is None:
         fmts = {
@@ -181,7 +181,11 @@ def store_stats(filename: Path,
             'mask_combined': '',
             'mask_final': '',
         }
-    header = ['#' + '\t'.join(fmts.keys())]
+    if filename.is_file():
+        header = []
+    else:
+        header = ['#' + '\t'.join(fmts.keys())]
     fmt = '\t'.join(f'{{{key}{val}}}' for key, val in fmts.items())
-    lines = '\n'.join(header + [fmt.format(**line) for line in stats])
-    filename.write_text(lines)
+    lines = '\n'.join(header + [fmt.format(**stats)])
+    with filename.open(mode='a') as fl:
+        fl.write(lines)

@@ -62,11 +62,11 @@ class IndexedMask:
         """Get mask indices from mask array."""
         indices = np.nonzero(mask)
         indices = np.array(list(zip(*indices)),
-                           dtype=[('i', dtype),
-                                  ('j', dtype),
-                                  ('k', dtype)])
-        if (np.any(indices['i'] < 0) or np.any(indices['j'] < 0) or
-            np.any(indices['k'] < 0)):
+                           dtype=[('chan', dtype),
+                                  ('y', dtype),
+                                  ('x', dtype)])
+        if (np.any(indices['chan'] < 0) or np.any(indices['x'] < 0) or
+            np.any(indices['y'] < 0)):
             raise ValueError(f'Wrong dtype: {dtype}')
 
         return indices
@@ -125,6 +125,15 @@ class IndexedMask:
         """Is position in mask?"""
         return np.isin(np.array([val], dtype=self.indices.dtype)[0],
                        self.indices)
+
+    def mask_from_position(self, pix: Tuple[int]) -> npt.ArrayLike:
+        """Recover the mask at a given position."""
+        ind = (self.indices['x'] == pix[0]) & (self.indices['y'] == pix[1])
+        chans = self.indices['chan'][ind]
+        mask = np.zeros(len(ind), dtype=bool)
+        mask[chans] = True
+
+        return mask
 
 def write_mask(mask: npt.ArrayLike, cube: SpectralCube,
                output: Path) -> None:

@@ -2,7 +2,7 @@
 #>>>             YCLEAN Version 2022
 #>>>
 #>>> Original from: Yanett Contreras
-#>>> Adapted to python>=3.6 by Fernando Olguin
+#>>> Adapted to python>=3.7 by Fernando Olguin
 #>>> =====================================================#
 """Automasking routine for ALMA cube CLEANing."""
 from typing import Optional, Tuple, Callable
@@ -13,7 +13,9 @@ from astropy import stats
 from casatasks import casalog
 from spectral_cube import SpectralCube
 import astropy.units as u
+import matplotlib.pyplot as plt
 import numpy as np
+import numpy.typing as npt
 
 # Import local modules
 from .hacer_mascara import make_threshold_mask, open_mask
@@ -23,7 +25,7 @@ from .utils import (load_images, tclean_parallel, common_beam_cube,
 def get_stats(cube: SpectralCube,
               residual: SpectralCube,
               secondary_lobe_level: float,
-              #residual_max: Optional[u.Quantity] = None,
+              pbmask: Optional[SpectralCube] = None,
               planes: Tuple[int] = (2, 8),
               ignore_borders: int = 5,
               log: Callable = print) -> tuple:
@@ -33,7 +35,7 @@ def get_stats(cube: SpectralCube,
       cube: image spectral cube.
       residual: residual spectral cube.
       secondary_lobe_level: secondary lobe level.
-      residual_max: optional; residual maximum value from previous iterations.
+      pbmask: optional; compute maximum only on values in mask.
       planes: optional; channel percentiles where statistics are measured.
       ignore_borders: optional; ignore this number of border channels.
       log: optional; logging function.
@@ -46,14 +48,16 @@ def get_stats(cube: SpectralCube,
     # Channel sample
     planes = np.arange(*planes, dtype=float)
     planes = np.floor(planes / 10 * cube.shape[0]).astype(int)
-    rms = 1.42602219 * \
-            stats.median_absolute_deviation(cube.unmasked_data[planes,:,:],
-                                            ignore_nan=True)
+    rms = stats.mad_std(cube.filled_data[planes,:,:], ignore_nan=True)
     log(f'Image rms: {rms.value:.3e} {rms.unit}')
 
     # Residual stats and SNR
-    aux = residual[ignore_borders:-ignore_borders]
-    residual_max = np.nanmax(aux.unmasked_data[:]) * cube.unit
+    if pbmask is not None:
+        aux = residual.with_mask(pbmask)
+        aux = residual[ignore_borders:-ignore_borders]
+    else:
+        aux = residual[ignore_borders:-ignore_borders]
+    residual_max = np.nanmax(aux.filled_data[:]) * cube.unit
     log(f'Residual maximum: {residual_max.value:.3e} {residual_max.unit}')
     #if residual_max is None or new_residual_max <= residual_max:
     #    residual_max = new_residual_max
@@ -61,7 +65,7 @@ def get_stats(cube: SpectralCube,
     #    return rms, None, None, None
 
     # Position of maximum
-    residual_max_pos = np.nanargmax(aux.unmasked_data[:])
+    residual_max_pos = np.nanargmax(aux.filled_data[:])
     residual_max_pos = np.unravel_index(residual_max_pos, aux.shape)
     residual_max_pos = (residual_max_pos[0] + ignore_borders,) + \
             residual_max_pos[1:]
@@ -72,6 +76,61 @@ def get_stats(cube: SpectralCube,
     limit_level_snr = residual_max / rms * secondary_lobe_level
 
     return rms, residual_max, residual_max_pos, limit_level_snr
+
+def plot_yclean_step(cube_spec: u.Quantity,
+                     mask_spec: npt.ArrayLike,
+                     res_spec: u.Quantity,
+                     dirty_spec: u.Quantity,
+                     plot_name: Path,
+                     threshold: Optional[str] = None,
+                     masklevel: Optional[u.Quantity] = masklevel,
+                     unit: Optional[u.Unit] = None) -> None:
+    """Plot spectra from a `yclean` step.
+
+    Args:
+      cube_spec: spectrum from the image.
+      mask_spec: mask slice.
+      res_spec: spectrum from the residual.
+      dirty_spec: spectrum from dirty image.
+      plot_name: figure name.
+      threshold: optional; plot the threshold value.
+      masklevel: optional; plot the mask threshold value.
+      unit: optional; intensity unit.
+    """
+    # Check unit
+    if unit is None:
+        unit = cube_spec.unit
+    res_spec = res_spec.value * cube_spec.unit
+    res_spec = res_spec.to(unit)
+    cube_spec = cube_spec.to(unit)
+    dirty_spec = dirty_spec.to(unit)
+
+    # Normalize mask
+    mask_spec_norm = mask_spec.astype(int) * np.nanmax(cube_spec)
+
+    # Plot
+    fix, ax = plt.subplots(1, 1, figsize=(15, 5))
+    ax.set_xlim(0, cube_spec.size-1)
+    ax.plot(cube_spec.value, 'k-', ds='steps-mid', label='image', zorder=7)
+    ax.plot(mask_spec_norm.value, 'b--', ds='steps-mid', label='mask', zorder=6)
+    ax.plot(res_spec.value, 'r-', ds='steps-mid', label='residual', zorder=5)
+    ax.plot(dirty_spec.value, 'g:', ds='steps-mid', label='dirty', zorder=4)
+
+    # Threshold comes in CASA notation
+    if threshold is not None:
+        thresh = u.Quantity(threshold) / u.beam
+        thresh = thresh.to(unit)
+        ax.axhline(thresh.value, ls='-', c='c', label='threshold', zorder=3)
+    
+    # Mask level comes as quantity
+    if masklevel is not None:
+        ax.axhline(masklevel.to(unit).value, ls='-', c='m', label='masklevel',
+                   zorder=3)
+
+    # Save figure
+    ax.legend(loc='best')
+    fig.savefig(plot_name, bbox_inches='tight')
+    plt.close()
 
 def get_threshold(limit_level_snr: u.Quantity, residual_max: u.Quantity,
                   rms: u.Quantity, log: Callable = casalog.post) -> str:
@@ -112,9 +171,11 @@ def yclean(vis: Path,
            iter_limit: int = 10,
            common_beam: bool = False,
            resume: bool = False,
+           peak_tol: float = 0.01,
            full: bool = False,
            pbcor: bool = False,
            pb_crop_level: Optional[float] = None,
+           spectrum_at: Optional[Tuple[int]] = None,
            log: Callable = casalog.post,
            **tclean_args) -> Tuple[Path]:
     """Automatic CLEANing.
@@ -128,6 +189,11 @@ def yclean(vis: Path,
     The `pb_crop_level` parameter is used to determine the limits where the
     image cube will be cropped after the final iteration.
 
+    The `peak_tol` determines if the peak should be scaled down. This may
+    be triggered when the residual peak is outside the mask and it did not
+    change in value (within the tolerance) after the tclean iteration.
+    The tolerance is defined as `peak_tol * rms`.
+
     Args:
       vis: visibility filename.
       imagename: imagename base name.
@@ -136,9 +202,11 @@ def yclean(vis: Path,
       iter_limit: optional; maximum number of yclean iterations.
       common_beam: optional; calculate common beam cube?
       resume: optional; resume computations.
+      peak_tol: optional; rms factor to trigger a peak correction.
       full: optional; store intermediate steps images and masks?
       pbcor: optional; compute the pbcor image after the last clean.
       pb_crop_level: optional; crop the final cube down to the given pb limit.
+      spectrum_at: optional; plot results using a spectrum at this pixel.
       log: optional; logging function.
       tclean_args: arguments for `tclean`.
 
@@ -177,11 +245,18 @@ def yclean(vis: Path,
         cube,
         residual,
         secondary_lobe_level,
+        pbmask=pbmap>0.2*pbmap.unit,
         log=log
     )
     log(f'Dirty rms: {rms}')
     log(f'Dirty residual maxmimum: {residual_max}')
     log(f'Dirty limit level SNR: {limit_level_snr}')
+
+    # Spectrum
+    if spectrum_at is not None:
+        dirty_spec = cube.unmasked_data[:, spectrum_at[1], spectrum_at[0]]
+    else:
+        dirty_spec = None
 
     # Check for resume
     mask_contents = mask_dir.glob(f'{imagename.name}.tc*.mask.fits')
@@ -198,16 +273,17 @@ def yclean(vis: Path,
 
     # Incremental step
     it = 0
-    stats = ({'it': it,
-              'rms': rms,
-              'residual_max': residual_max,
-              'residual_max_pos': residual_max_pos,
-              'threshold': 'none',
-              'mask_level': 0 * rms.unit,
-              'mask_initial': 0,
-              'mask_combined': 0,
-              'mask_final': 0},
-             )
+    stats_file = imagename.parent / 'statistics.dat'
+    store_stats(stats_file,
+                {'it': it,
+                 'rms': rms,
+                 'residual_max': residual_max,
+                 'residual_max_pos': residual_max_pos,
+                 'threshold': 'none',
+                 'mask_level': 0 * rms.unit,
+                 'mask_initial': 0,
+                 'mask_combined': 0,
+                 'mask_final': 0})
     cumulative_mask = None
     old_residual_max = residual_max
     while limit_level_snr > min_limit_level:
@@ -287,6 +363,7 @@ def yclean(vis: Path,
             residual,
             secondary_lobe_level,
             #residual_max=residual_max,
+            pbmask=pbmap>0.2*pbmap.unit,
             planes=(2, 9),
             log=log
         )
@@ -294,12 +371,32 @@ def yclean(vis: Path,
                'residual_max_pos': residual_max_pos, 'threshold': threshold,
                'mask_level': masklevel}
         sti.update(mask_stats)
-        stats += (sti,)
+        store_stats(stats_file, sti)
         if residual_max <= old_residual_max :
-            old_residual_max = residual_max
+            tol = peak_tol * rms
+            # We know residual_max is already <= old_residual_max
+            if residual_max >= old_residual_max - tol:
+                residual_max = 0.8 * residual_max
+                if residual_max <= 2.0 * rms:
+                    log('Residual max cannot be corrected, breaking ...')
+                    break
+                log(f'Corrected residual max: {residual_max}')
+            else:
+                old_residual_max = residual_max
         else:
             log('Residual maximum increased, breaking ...')
             break
+
+        # Plot spectrum
+        if spectrum_at is not None:
+            cube_spec = cube.unmasked_data[:, spectrum_at[1], spectrum_at[0]]
+            res_spec = residual.unmasked_data[:, spectrum_at[1], spectrum_at[0]]
+            mask_spec = cumulative_mask.mask_from_position(spectrum_at)
+            plot_name = f'.spec{spectrum_at[0]}_{spectrum_at[1]}.png'
+            plot_name = new_mask_name.with_suffix(plot_name)
+            plot_yclean_step(cube_spec, mask_spec, res_spec, dirty_spec,
+                             plot_name, threshold=threshold,
+                             masklevel=masklevel, unit=u.mJy/u.beam)
 
         # Delete old masks
         if not full and it > 2:
@@ -374,6 +471,7 @@ def yclean(vis: Path,
         cube,
         residual,
         secondary_lobe_level,
+        pbmask=pbmap>0.2*pbmap.unit,
         planes=(2, 9),
         log=log
     )
@@ -381,8 +479,7 @@ def yclean(vis: Path,
            'residual_max_pos': residual_max_pos, 'threshold': threshold,
            'mask_level': masklevel}
     sti.update(mask_stats)
-    stats += (sti,)
-    store_stats(imagename.parent / 'statistics.dat', stats)
+    store_stats(stats_file, sti)
 
     # Crop image? Shouldn't be used with cubes that will be joined
     if pb_crop_level is not None:
