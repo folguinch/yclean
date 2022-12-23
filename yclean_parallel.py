@@ -230,7 +230,7 @@ def yclean(vis: Path,
             log(f'Iter {it}: loading previous mask: {cumulative_mask}')
             cumulative_mask = open_mask(cumulative_mask)
         else:
-            pass
+            resume = False
 
         # Some logging
         log((f'Iter {it}: SNR of Maximum Residual: '

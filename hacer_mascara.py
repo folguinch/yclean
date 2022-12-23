@@ -43,7 +43,7 @@ class IndexedMask:
 
         # Find origin and shift
         origin = tuple(np.min(indices[field])
-                       for field in self.indices.dtype.fields)
+                       for field in indices.dtype.fields)
         #origins = tuple()
         #for field in indices.dtype.fields:
         #    origin = np.min(indices[field])
@@ -74,7 +74,7 @@ class IndexedMask:
     def update_to(self, mask: npt.ArrayLike,
                   shift_back: bool = False) -> None:
         """Replace the indices using input mask."""
-        self.indices = indices_from_array(mask)
+        self.indices = IndexedMask.indices_from_array(mask)
 
         if shift_back:
             self.shift_back()
@@ -106,7 +106,7 @@ class IndexedMask:
             self.shift_to_origin()
 
         # Get the shape
-        shape = get_max(shift=1)
+        shape = self.get_max(shift=1)
 
         # Generate array
         mask = np.zeros(shape, dtype=bool)
@@ -164,15 +164,16 @@ def remove_small_masks(mask: IndexedMask,
       An `IndexedMask` object.
     """
     # Some information first
-    beams = np.array(beam_area, dtype=int)
-    unique_beams, *_ = np.unique(beams)
+    working_mask = mask.minimal_mask(shift_to_origin=True)
+    valid_beam_area = beam_area[mask.origin[0]:][:working_mask.shape[0]]
+    beams = np.array(valid_beam_area, dtype=int)
+    unique_beams = np.unique(beams)
     if psutil is not None:
         log(f'Percentage of RAM: {psutil.virtual_memory().percent}')
     log(f'Beam area range: {np.min(beams)} - {np.max(beams)}')
     log(f'Number of unique beams: {len(unique_beams)}')
 
     # Label mask
-    working_mask = mask.minimal_mask(shift_to_origin=True)
     log(f'Working mask shape: {working_mask.shape}')
     structure = ndimg.generate_binary_structure(working_mask.ndim, 1)
     labels, nlabels = ndimg.label(working_mask, structure=structure)
@@ -283,7 +284,7 @@ def make_threshold_mask(cube: SpectralCube,
     # Filter out small mask pieces
     log('Removing small masks')
     mask = remove_small_masks(mask, cube.pixels_per_beam, beam_fraction,
-                              dilate=dilate, log=log)
+                              log=log)
     stats['mask_final'] = np.sum(mask.size)
     log(f"Final number of valid data: {stats['mask_final']}")
 
@@ -313,11 +314,11 @@ def make_threshold_mask(cube: SpectralCube,
 
 def open_mask(mask_name: Path):
     """Open a mask and load the array."""
-    mask = SpectralCube.read(mask_name, use_dask=False, format='casa')
+    mask = SpectralCube.read(mask_name, use_dask=True, format='casa')
     #mask.allow_huge_operations = True
     #mask.use_dask_scheduler('threads', num_workers=12)
     mask = mask.unmasked_data[:].value.astype(bool)
     #mask = da.from_array(mask.astype(bool), chunks='auto')
-    mask = IndexedMask.from_array()
+    mask = IndexedMask.from_array(mask.compute())
 
     return mask
