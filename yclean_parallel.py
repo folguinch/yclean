@@ -83,7 +83,7 @@ def plot_yclean_step(cube_spec: u.Quantity,
                      dirty_spec: u.Quantity,
                      plot_name: Path,
                      threshold: Optional[str] = None,
-                     masklevel: Optional[u.Quantity] = masklevel,
+                     masklevel: Optional[u.Quantity] = None,
                      unit: Optional[u.Unit] = None) -> None:
     """Plot spectra from a `yclean` step.
 
