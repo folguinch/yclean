@@ -180,9 +180,10 @@ def store_stats(filename: Path,
             'mask_initial': '',
             'mask_combined': '',
             'mask_final': '',
+            'peak_corrected': '',
         }
     if filename.is_file():
-        header = []
+        header = ['']
     else:
         header = ['#' + '\t'.join(fmts.keys())]
     fmt = '\t'.join(f'{{{key}{val}}}' for key, val in fmts.items())
