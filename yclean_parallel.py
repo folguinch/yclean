@@ -48,16 +48,17 @@ def get_stats(cube: SpectralCube,
     # Channel sample
     planes = np.arange(*planes, dtype=float)
     planes = np.floor(planes / 10 * cube.shape[0]).astype(int)
-    rms = stats.mad_std(cube.filled_data[planes,:,:], ignore_nan=True)
+    valid_cube = cube.subcube_from_mask(pbmask)
+    rms = stats.mad_std(valid_cube.umasked_data[planes,:,:], ignore_nan=True)
     log(f'Image rms: {rms.value:.3e} {rms.unit}')
 
     # Residual stats and SNR
     if pbmask is not None:
-        aux = residual.with_mask(pbmask)
+        aux = residual.subcube_from_mask(pbmask)
         aux = residual[ignore_borders:-ignore_borders]
     else:
         aux = residual[ignore_borders:-ignore_borders]
-    residual_max = np.nanmax(aux.filled_data[:]) * cube.unit
+    residual_max = np.nanmax(aux.umasked_data[:]) * cube.unit
     log(f'Residual maximum: {residual_max.value:.3e} {residual_max.unit}')
     #if residual_max is None or new_residual_max <= residual_max:
     #    residual_max = new_residual_max
@@ -65,7 +66,7 @@ def get_stats(cube: SpectralCube,
     #    return rms, None, None, None
 
     # Position of maximum
-    residual_max_pos = np.nanargmax(aux.filled_data[:])
+    residual_max_pos = np.nanargmax(aux.unmasked_data[:])
     residual_max_pos = np.unravel_index(residual_max_pos, aux.shape)
     residual_max_pos = (residual_max_pos[0] + ignore_borders,) + \
             residual_max_pos[1:]
@@ -132,8 +133,9 @@ def plot_yclean_step(cube_spec: u.Quantity,
     fig.savefig(plot_name, bbox_inches='tight')
     plt.close()
 
-def get_threshold(limit_level_snr: u.Quantity, residual_max: u.Quantity,
-                  rms: u.Quantity, log: Callable = casalog.post) -> str:
+def get_threshold(secondary_lobe_level: u.Quantity,
+                  residual_max: u.Quantity,
+                  log: Callable = casalog.post) -> str:
     """Calculate the `tclean` threshold.
 
     We use an arctan function normalized so a secondary lobe level of 0.2 will
@@ -283,9 +285,12 @@ def yclean(vis: Path,
                  'mask_level': 0 * rms.unit,
                  'mask_initial': 0,
                  'mask_combined': 0,
-                 'mask_final': 0})
+                 'mask_final': 0,
+                 'peak_corrected': False})
     cumulative_mask = None
     old_residual_max = residual_max
+    peak_corrected = 0
+    break_flag = False
     while limit_level_snr > min_limit_level:
         # Iteration limit
         if it > iter_limit:
@@ -322,7 +327,7 @@ def yclean(vis: Path,
         log(f'Iter {it}: SNR of masklevel: {masklevel/rms}')
 
         # Clean threshold
-        threshold = get_threshold(limit_level_snr, residual_max, rms, log=log)
+        threshold = get_threshold(secondary_lobe_level, residual_max, log=log)
         log(f'Iter {it}: tclean threshold: {threshold}')
 
         # The masks are defined based on the previous image and residuals
@@ -333,9 +338,10 @@ def yclean(vis: Path,
             pbmap,
             masklevel,
             new_mask_name,
+            previous_mask=cumulative_mask,
             beam_fraction=0.5,
             use_residual=True,
-            previous_mask=cumulative_mask,
+            log=log,
         )
         log(('Max residual in mask: '
              f'{cumulative_mask.is_in(tuple(residual_max_pos))}'))
@@ -363,7 +369,7 @@ def yclean(vis: Path,
             residual,
             secondary_lobe_level,
             #residual_max=residual_max,
-            pbmask=pbmap>0.2*pbmap.unit,
+            pbmask=pbmap > 0.2 * pbmap.unit,
             planes=(2, 9),
             log=log
         )
@@ -371,21 +377,32 @@ def yclean(vis: Path,
                'residual_max_pos': residual_max_pos, 'threshold': threshold,
                'mask_level': masklevel}
         sti.update(mask_stats)
-        store_stats(stats_file, sti)
-        if residual_max <= old_residual_max :
-            tol = peak_tol * rms
-            # We know residual_max is already <= old_residual_max
-            if residual_max >= old_residual_max - tol:
-                residual_max = 0.8 * residual_max
-                if residual_max <= 2.0 * rms:
-                    log('Residual max cannot be corrected, breaking ...')
-                    break
-                log(f'Corrected residual max: {residual_max}')
-            else:
+        
+        # Apply peak correction
+        tol = peak_tol * rms
+        if old_residual_max - tol <= residual_max <= old_residual_max + tol:
+            peak_corrected += 1
+            residual_max = 0.8**peak_corrected * residual_max
+            limit_level_snr = 0.8**peak_corrected * limit_level_snr
+            log(f'Corrected residual max: {residual_max}')
+            if residual_max <= 2.0 * rms:
+                log('Corrected residual max below final threshold, breaking')
+                break_flag = True
+        elif peak_corrected > 0:
+            if residual_max <= 0.8**peak_corrected * old_residual_max:
+                peak_corrected = 0
                 old_residual_max = residual_max
+            else:
+                log('Residual maximum increased, breaking')
+                break_flag = True
+        elif residual_max > old_residual_max:
+            log('Residual maximum increased, breaking')
+            break_flag = True
         else:
-            log('Residual maximum increased, breaking ...')
-            break
+            peak_corrected = 0
+            old_residual_max = residual_max
+        sti['peak_corrected'] = peak_corrected
+        store_stats(stats_file, sti)
 
         # Plot spectrum
         if spectrum_at is not None:
@@ -402,6 +419,24 @@ def yclean(vis: Path,
         if not full and it > 2:
             old_mask = mask_dir / f'{imagename.name}.tc{it-3}.mask'
             os.system(f'rm -rf {old_mask} {old_mask}.fits')
+
+        # Break conditions
+        #if residual_max <= old_residual_max :
+        #    tol = peak_tol * rms
+        #    # We know residual_max is already <= old_residual_max
+        #    if residual_max >= old_residual_max - tol:
+        #        residual_max = 0.8 * residual_max
+        #        if residual_max <= 2.0 * rms:
+        #            log('Residual max cannot be corrected, breaking ...')
+        #            break
+        #        log(f'Corrected residual max: {residual_max}')
+        #    else:
+        #        old_residual_max = residual_max
+        #else:
+        #    log('Residual maximum increased, breaking ...')
+        #    break
+        if break_flag:
+            break
 
     # Re-open previous mask if jump here
     it += 1
@@ -429,6 +464,7 @@ def yclean(vis: Path,
         use_residual=True,
         previous_mask=cumulative_mask,
         dilate=2,
+        log=log,
     )
 
     # Last clean
