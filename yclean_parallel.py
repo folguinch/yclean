@@ -49,7 +49,7 @@ def get_stats(cube: SpectralCube,
     planes = np.arange(*planes, dtype=float)
     planes = np.floor(planes / 10 * cube.shape[0]).astype(int)
     valid_cube = cube.subcube_from_mask(pbmask)
-    rms = stats.mad_std(valid_cube.umasked_data[planes,:,:], ignore_nan=True)
+    rms = stats.mad_std(valid_cube.unmasked_data[planes,:,:], ignore_nan=True)
     log(f'Image rms: {rms.value:.3e} {rms.unit}')
 
     # Residual stats and SNR
@@ -58,7 +58,7 @@ def get_stats(cube: SpectralCube,
         aux = residual[ignore_borders:-ignore_borders]
     else:
         aux = residual[ignore_borders:-ignore_borders]
-    residual_max = np.nanmax(aux.umasked_data[:]) * cube.unit
+    residual_max = np.nanmax(aux.unmasked_data[:]) * cube.unit
     log(f'Residual maximum: {residual_max.value:.3e} {residual_max.unit}')
     #if residual_max is None or new_residual_max <= residual_max:
     #    residual_max = new_residual_max
@@ -142,14 +142,11 @@ def get_threshold(secondary_lobe_level: u.Quantity,
     result in a threshold of `0.4*residual_max`.
 
     Args:
-      limit_level_snr: limit level SNR.
+      secondary_lobe_level: secondary lobe level.
       residual_max: maximum of the residual.
-      rms: root mean squared.
       log: optional; logging function.
     """
     # Get original value
-    limit_level = limit_level_snr * rms
-    secondary_lobe_level = limit_level / residual_max
     if not secondary_lobe_level.unit.is_equivalent(u.Unit(1)):
         raise ValueError(('There is a problem with units: '
                           f'{secondary_lobe_level}'))
@@ -380,7 +377,8 @@ def yclean(vis: Path,
         
         # Apply peak correction
         tol = peak_tol * rms
-        if old_residual_max - tol <= residual_max <= old_residual_max + tol:
+        if (residual_max >= 0.8**peak_corrected * old_residual_max - tol and
+            residual_max <= 0.8**peak_corrected * old_residual_max + tol):
             peak_corrected += 1
             residual_max = 0.8**peak_corrected * residual_max
             limit_level_snr = 0.8**peak_corrected * limit_level_snr
@@ -388,14 +386,7 @@ def yclean(vis: Path,
             if residual_max <= 2.0 * rms:
                 log('Corrected residual max below final threshold, breaking')
                 break_flag = True
-        elif peak_corrected > 0:
-            if residual_max <= 0.8**peak_corrected * old_residual_max:
-                peak_corrected = 0
-                old_residual_max = residual_max
-            else:
-                log('Residual maximum increased, breaking')
-                break_flag = True
-        elif residual_max > old_residual_max:
+        elif residual_max > 0.8**peak_corrected * old_residual_max:
             log('Residual maximum increased, breaking')
             break_flag = True
         else:
