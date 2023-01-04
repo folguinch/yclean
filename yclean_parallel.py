@@ -110,7 +110,7 @@ def plot_yclean_step(cube_spec: u.Quantity,
     mask_spec_norm = mask_spec.astype(int) * np.nanmax(cube_spec)
 
     # Plot
-    fix, ax = plt.subplots(1, 1, figsize=(15, 5))
+    fig, ax = plt.subplots(1, 1, figsize=(15, 5))
     ax.set_xlim(0, cube_spec.size-1)
     ax.plot(cube_spec.value, 'k-', ds='steps-mid', label='image', zorder=7)
     ax.plot(mask_spec_norm.value, 'b--', ds='steps-mid', label='mask', zorder=6)
