@@ -1,5 +1,5 @@
 """Common utilities."""
-from typing import Callable, Sequence, Tuple, Optional, Dict
+from typing import Callable, Sequence, Tuple, Optional, Dict, List
 from datetime import datetime
 from pathlib import Path
 import itertools
@@ -17,7 +17,7 @@ def load_images(imagename: Path,
                 load: Sequence[str] = ('image', 'residual'),
                 export_to: Optional[Path] = None,
                 import_format: str = 'casa',
-                log: Callable = casalog.post) -> Tuple[SpectralCube]:
+                log: Callable = casalog.post) -> List[SpectralCube]:
     """Load images into `SpectralCube` objects.
 
     Args:
@@ -45,7 +45,7 @@ def load_images(imagename: Path,
         images.append(image)
         log(f'Loaded {imtype} with shape {image.shape}')
 
-    return tuple(images)
+    return images
 
 def second_max_local(psf: SpectralCube):
     """Determine the psf secondary lobe level."""
