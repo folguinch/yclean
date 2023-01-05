@@ -112,10 +112,10 @@ def plot_yclean_step(cube_spec: u.Quantity,
     # Plot
     fig, ax = plt.subplots(1, 1, figsize=(15, 5))
     ax.set_xlim(0, cube_spec.size-1)
-    ax.plot(cube_spec.value, 'k-', ds='steps-mid', label='image', zorder=7)
-    ax.plot(mask_spec_norm.value, 'b--', ds='steps-mid', label='mask', zorder=6)
-    ax.plot(res_spec.value, 'r-', ds='steps-mid', label='residual', zorder=5)
-    ax.plot(dirty_spec.value, 'g:', ds='steps-mid', label='dirty', zorder=4)
+    ax.plot(cube_spec.value, 'k-', ds='steps-mid', label='image', zorder=4)
+    ax.plot(mask_spec_norm.value, 'b--', ds='steps-mid', label='mask', zorder=5)
+    ax.plot(res_spec.value, 'r-', ds='steps-mid', label='residual', zorder=6)
+    ax.plot(dirty_spec.value, 'g:', ds='steps-mid', label='dirty', zorder=7)
 
     # Threshold comes in CASA notation
     if threshold is not None:
@@ -400,7 +400,7 @@ def yclean(vis: Path,
             cube_spec = cube.unmasked_data[:, spectrum_at[1], spectrum_at[0]]
             res_spec = residual.unmasked_data[:, spectrum_at[1], spectrum_at[0]]
             mask_spec = cumulative_mask.mask_from_position(spectrum_at)
-            plot_name = f'.spec{spectrum_at[0]}_{spectrum_at[1]}.png'
+            plot_name = f'.spec{spectrum_at[0]}_{spectrum_at[1]}.jpg'
             plot_name = new_mask_name.with_suffix(plot_name)
             plot_yclean_step(cube_spec, mask_spec, res_spec, dirty_spec,
                              plot_name, threshold=threshold,
