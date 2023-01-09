@@ -303,6 +303,7 @@ def make_threshold_mask(cube: SpectralCube,
     # Dilate
     if dilate is not None and dilate > 0:
         log(f'Dilating mask {dilate} iteration(s)')
+        structure = ndimg.generate_binary_structure(mask_array.ndim, 1)
         if psutil is not None:
             log(f'Percentage of RAM: {psutil.virtual_memory().percent}')
         if ndmorph is not None:
