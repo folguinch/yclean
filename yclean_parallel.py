@@ -163,6 +163,38 @@ def get_threshold(secondary_lobe_level: u.Quantity,
 
     return f'{threshold.value}mJy'
 
+def resume_from_stats(stats_file: Path,
+                      mask_dir: Path,
+                      iter_limit: int = 10) -> Tuple:
+    """Load values resuming values from stats file."""
+    # Load stats
+    stats = np.loadtxt(stats_file, usecols=(0, 1, 2, 11), ndmin=2)
+    it = stats[:,0].astype(int)
+    rms = stats[:,1]
+    residual_max = stats[:,2]
+    peak_corrected = stats[:,3]
+
+    # Determine step
+    if ((it[-1] != 0 and residual_max[-1] > residual_max[-2]) or
+        it[-1] > iter_limit):
+        # The main cycle finished
+        cumulative_mask = mask_dir / f'{imagename.name}.tc{it[-1]-1}.mask'
+        cumulative_mask = open_mask(cumulative_mask)
+
+        # Vals are: rms, residual_max, it, cumulative_mask, peak_corrected,
+        #           break_flag
+        return (rms[-1], residual_max[-1], it[-1], cumulative_mask,
+                peak_corrected[-1], True)
+    else:
+        if it[-1] == 0:
+            cumulative_mask = None
+        else:
+            cumulative_mask = mask_dir / f'{imagename.name}.tc{it[-1]-1}.mask'
+            cumulative_mask = open_mask(cumulative_mask)
+
+        return (rms[-1], residual_max[-1], it_max, cumulative_mask,
+                peak_corrected[-1], False)
+
 def yclean(vis: Path,
            imagename: str,
            nproc: int = 5,
@@ -239,18 +271,6 @@ def yclean(vis: Path,
     secondary_lobe_level = second_max_local(psf)
     log(f'Secondary Lobe PSF Level: {secondary_lobe_level}')
 
-    # RMS calculated in a subset of channels
-    rms, residual_max, residual_max_pos, limit_level_snr = get_stats(
-        cube,
-        residual,
-        secondary_lobe_level,
-        pbmask=pbmap>0.2*pbmap.unit,
-        log=log
-    )
-    log(f'Dirty rms: {rms}')
-    log(f'Dirty residual maxmimum: {residual_max}')
-    log(f'Dirty limit level SNR: {limit_level_snr}')
-
     # Spectrum
     if spectrum_at is not None:
         dirty_spec = cube.unmasked_data[:, spectrum_at[1], spectrum_at[0]]
@@ -258,37 +278,64 @@ def yclean(vis: Path,
         dirty_spec = None
 
     # Check for resume
-    mask_contents = mask_dir.glob(f'{imagename.name}.tc*.mask.fits')
-    mask_contents = list(map(str, mask_contents))
-    if resume and len(mask_contents) != 0:
-        for i in range(0, iter_limit+1):
-            aux_mask_name = mask_dir / f'{imagename.name}.tc{i}.mask.fits'
-            if str(aux_mask_name) in mask_contents:
-                min_it = i
-                log(f'Lowest mask iteration number: tc{min_it}')
-                break
-    else:
-        min_it = -1
-
-    # Incremental step
+    #mask_contents = mask_dir.glob(f'{imagename.name}.tc*.mask.fits')
+    #mask_contents = list(map(str, mask_contents))
+    #if resume and len(mask_contents) != 0:
+    #    for i in range(0, iter_limit+1):
+    #        aux_mask_name = mask_dir / f'{imagename.name}.tc{i}.mask.fits'
+    #        if str(aux_mask_name) in mask_contents:
+    #            min_it = i
+    #            log(f'Lowest mask iteration number: tc{min_it}')
+    #            break
+    #else:
+    #    min_it = -1
     it = 0
     stats_file = imagename.parent / 'statistics.dat'
-    store_stats(stats_file,
-                {'it': it,
-                 'rms': rms,
-                 'residual_max': residual_max,
-                 'residual_max_pos': residual_max_pos,
-                 'threshold': 'none',
-                 'mask_level': 0 * rms.unit,
-                 'mask_initial': 0,
-                 'mask_combined': 0,
-                 'mask_final': 0,
-                 'peak_corrected': False})
-    cumulative_mask = None
-    old_residual_max = residual_max
-    peak_corrected = 0
-    break_flag = False
-    while limit_level_snr > min_limit_level:
+    if stats_file.is_file() and resume:
+        log('Resuming from stats file')
+        stats = resume_from_stats(stats_file, mask_dir, iter_limit=iter_limit)
+        rms = stats[0] * cube.unit
+        old_residual_max = stats[1] * cube.unit
+        residual_max = 0.8**peak_corrected * stats[1] * cube.unit
+        limit_level_snr = residual_max / rms * secondary_lobe_level
+        it = int(stats[2])
+        cumulative_mask = stats[3]
+        peak_corrected = stats[4]
+        break_flag = stats[5]
+    else:
+        # RMS calculated in a subset of channels
+        rms, residual_max, residual_max_pos, limit_level_snr = get_stats(
+            cube,
+            residual,
+            secondary_lobe_level,
+            pbmask=pbmap>0.2*pbmap.unit,
+            log=log
+        )
+        log(f'Dirty rms: {rms}')
+        log(f'Dirty residual maxmimum: {residual_max}')
+        log(f'Dirty limit level SNR: {limit_level_snr}')
+
+        if stats_file.is_file():
+            log('Stats file found, deleting')
+            stats_file.unlink()
+        store_stats(stats_file,
+                    {'it': it,
+                    'rms': rms,
+                    'residual_max': residual_max,
+                    'residual_max_pos': residual_max_pos,
+                    'threshold': 'none',
+                    'mask_level': 0 * rms.unit,
+                    'mask_initial': 0,
+                    'mask_combined': 0,
+                    'mask_final': 0,
+                    'peak_corrected': 0})
+        cumulative_mask = None
+        peak_corrected = 0
+        break_flag = False
+        old_residual_max = residual_max
+
+    # Incremental steps
+    while limit_level_snr > min_limit_level and not break_flag:
         # Iteration limit
         if it > iter_limit:
             break
@@ -296,19 +343,19 @@ def yclean(vis: Path,
 
         # Resume
         new_mask_name = mask_dir / f'{imagename.name}.tc{it-1}.mask'
-        if resume and new_mask_name.is_dir():
-            log(f'Iter {it}: skipping iteration')
-            continue
-        elif resume and it <= min_it:
-            log(f'Iter {it}: skipping iteration')
-            continue
-        elif resume and it > 1 and not new_mask_name.is_dir():
-            log(f'Resuming at iteration: {it}')
-            cumulative_mask =  mask_dir / f'{imagename.name}.tc{it-2}.mask'
-            log(f'Iter {it}: loading previous mask: {cumulative_mask}')
-            cumulative_mask = open_mask(cumulative_mask)
-        else:
-            resume = False
+        #if resume and new_mask_name.is_dir():
+        #    log(f'Iter {it}: skipping iteration')
+        #    continue
+        #elif resume and it <= min_it:
+        #    log(f'Iter {it}: skipping iteration')
+        #    continue
+        #elif resume and it > 1 and not new_mask_name.is_dir():
+        #    log(f'Resuming at iteration: {it}')
+        #    cumulative_mask =  mask_dir / f'{imagename.name}.tc{it-2}.mask'
+        #    log(f'Iter {it}: loading previous mask: {cumulative_mask}')
+        #    cumulative_mask = open_mask(cumulative_mask)
+        #else:
+        #    resume = False
 
         # Some logging
         log((f'Iter {it}: SNR of Maximum Residual: '
@@ -431,11 +478,11 @@ def yclean(vis: Path,
 
     # Re-open previous mask if jump here
     it += 1
-    if resume and cumulative_mask is None:
-        log(f'Resuming at iteration: final')
-        cumulative_mask =  mask_dir / f'{imagename.name}.tc{it-2}.mask'
-        log(f'Iter final: Loading previous mask: {cumulative_mask}')
-        cumulative_mask = open_mask(cumulative_mask)
+    #if resume and cumulative_mask is None:
+    #    log(f'Resuming at iteration: final')
+    #    cumulative_mask =  mask_dir / f'{imagename.name}.tc{it-2}.mask'
+    #    log(f'Iter final: Loading previous mask: {cumulative_mask}')
+    #    cumulative_mask = open_mask(cumulative_mask)
 
     # Calculate a final 3*sigma mask
     log('Main iteration cycle done')
