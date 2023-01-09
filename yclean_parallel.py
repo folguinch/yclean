@@ -165,8 +165,16 @@ def get_threshold(secondary_lobe_level: u.Quantity,
 
 def resume_from_stats(stats_file: Path,
                       mask_dir: Path,
+                      file_root: str,
                       iter_limit: int = 10) -> Tuple:
-    """Load values resuming values from stats file."""
+    """Load values resuming values from stats file.
+    
+    Args:
+      stats_file: file with the statistics table.
+      mask_dir: directory with the masks.
+      file_root: mask name root name.
+      iter_limits: optional; maximum number of iterations.
+    """
     # Load stats
     stats = np.loadtxt(stats_file, usecols=(0, 1, 2, 11), ndmin=2)
     it = stats[:,0].astype(int)
@@ -178,7 +186,7 @@ def resume_from_stats(stats_file: Path,
     if ((it[-1] != 0 and residual_max[-1] > residual_max[-2]) or
         it[-1] > iter_limit):
         # The main cycle finished
-        cumulative_mask = mask_dir / f'{imagename.name}.tc{it[-1]-1}.mask'
+        cumulative_mask = mask_dir / f'{file_root}.tc{it[-1]-1}.mask'
         cumulative_mask = open_mask(cumulative_mask)
 
         # Vals are: rms, residual_max, it, cumulative_mask, peak_corrected,
@@ -293,14 +301,15 @@ def yclean(vis: Path,
     stats_file = imagename.parent / 'statistics.dat'
     if stats_file.is_file() and resume:
         log('Resuming from stats file')
-        stats = resume_from_stats(stats_file, mask_dir, iter_limit=iter_limit)
+        stats = resume_from_stats(stats_file, mask_dir, imagename.name,
+                                  iter_limit=iter_limit)
         rms = stats[0] * cube.unit
+        peak_corrected = stats[4]
         old_residual_max = stats[1] * cube.unit
         residual_max = 0.8**peak_corrected * stats[1] * cube.unit
         limit_level_snr = residual_max / rms * secondary_lobe_level
         it = int(stats[2])
         cumulative_mask = stats[3]
-        peak_corrected = stats[4]
         break_flag = stats[5]
     else:
         # RMS calculated in a subset of channels
