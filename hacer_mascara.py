@@ -15,10 +15,6 @@ try:
     import psutil
 except ImportError:
     psutil = None
-try:
-    from dask_image import ndmorph
-except ImportError:
-    ndmeasure = ndmorph = None
 
 class IndexedMask:
     """Store a mask by tracking `True` indices.
@@ -306,14 +302,9 @@ def make_threshold_mask(cube: SpectralCube,
         structure = ndimg.generate_binary_structure(mask_array.ndim, 1)
         if psutil is not None:
             log(f'Percentage of RAM: {psutil.virtual_memory().percent}')
-        if ndmorph is not None:
-            mask_array = ndmorph.binary_dilation(mask_array,
-                                                 structure=structure,
-                                                 iterations=dilate)
-        else:
-            mask_array = ndimg.binary_dilation(mask_array,
-                                               structure=structure,
-                                               iterations=dilate)
+        mask_array = ndimg.binary_dilation(mask_array,
+                                           structure=structure,
+                                           iterations=dilate)
         mask.update_to(mask_array)
     
     # Write mask
