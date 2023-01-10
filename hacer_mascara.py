@@ -290,8 +290,6 @@ def make_threshold_mask(cube: SpectralCube,
     log('Removing small masks')
     mask = remove_small_masks(mask, cube.pixels_per_beam, beam_fraction,
                               log=log)
-    stats['mask_final'] = np.sum(mask.size)
-    log(f"Final number of valid data: {stats['mask_final']}")
 
     # Build mask array
     mask_array = mask.to_array()
@@ -306,6 +304,10 @@ def make_threshold_mask(cube: SpectralCube,
                                            structure=structure,
                                            iterations=dilate)
         mask.update_to(mask_array)
+
+    # Final stats
+    stats['mask_final'] = mask.size
+    log(f"Final number of valid data: {stats['mask_final']}")
     
     # Write mask
     log('Writing mask')
