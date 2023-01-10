@@ -560,7 +560,7 @@ def yclean(vis: Path,
     )
     sti = {'it': it, 'rms': rms, 'residual_max': residual_max,
            'residual_max_pos': residual_max_pos, 'threshold': threshold,
-           'mask_level': masklevel}
+           'mask_level': masklevel, 'peak_corrected': peak_corrected}
     sti.update(mask_stats)
     store_stats(stats_file, sti)
 
