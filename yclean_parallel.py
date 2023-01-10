@@ -564,6 +564,17 @@ def yclean(vis: Path,
     sti.update(mask_stats)
     store_stats(stats_file, sti)
 
+    # Plot spectrum
+    if spectrum_at is not None:
+        cube_spec = cube.unmasked_data[:, spectrum_at[1], spectrum_at[0]]
+        res_spec = residual.unmasked_data[:, spectrum_at[1], spectrum_at[0]]
+        mask_spec = cumulative_mask.mask_from_position(spectrum_at)
+        plot_name = f'.spec{spectrum_at[0]}_{spectrum_at[1]}.jpg'
+        plot_name = new_mask_name.with_suffix(plot_name)
+        plot_yclean_step(cube_spec, mask_spec, res_spec, dirty_spec,
+                         plot_name, threshold=threshold,
+                         masklevel=masklevel, unit=u.mJy/u.beam)
+
     # Crop image? Shouldn't be used with cubes that will be joined
     if pb_crop_level is not None:
         log(f'Cropping image down to pb level: {pb_crop}')
