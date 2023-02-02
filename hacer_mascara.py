@@ -340,13 +340,15 @@ def make_threshold_mask(cube: SpectralCube,
     # Join with previous mask
     mask = IndexedMask.from_array(mask)
     stats['mask_initial'] = mask.size
-    log(f"Inital valid data in mask: {stats['mask_initial']}")
+    log(f"Initial valid data in mask: {stats['mask_initial']}")
+    log(f'Initial mask origin: {mask.origin}')
     if previous_mask is not None:
         log('Combining masks')
         log(f'Previous mask valid data: {previous_mask.size}')
         mask.merge_with(previous_mask)
         stats['mask_combined'] = mask.size
         log(f"Valid data after combining masks: {stats['mask_combined']}")
+        log(f'Combined mask origin: {mask.origin}')
     else:
         stats['mask_combined'] = mask.size
 
@@ -372,6 +374,7 @@ def make_threshold_mask(cube: SpectralCube,
     # Final stats
     stats['mask_final'] = mask.size
     log(f"Final number of valid data: {stats['mask_final']}")
+    log(f'Final mask origin: {mask.origin}')
     
     # Write mask
     log('Writing mask')
