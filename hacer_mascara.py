@@ -23,13 +23,15 @@ class IndexedMask:
       indices: structured array containing the indices along each axis.
       shape: shape of the mask.
       origin: indices origin.
+      is_shifted: origin shifting status.
     """
 
     def __init__(self, indices: npt.ArrayLike, shape: Tuple[int],
-                 origin: Tuple[int]) -> None:
+                 origin: Tuple[int], is_shifted: bool = False) -> None:
         self.indices = indices
         self.shape = shape
         self.origin = origin
+        self.is_shifted = is_shifted
 
     @classmethod
     def from_array(cls, mask: npt.ArrayLike):
@@ -72,25 +74,47 @@ class IndexedMask:
     def get_origin(indices: npt.ArrayLike) -> Tuple[int]:
         """Get the origin of structured array of indices.
 
-        The origin is defined as the lowest indices in the array.
+        The origin is defined as the lowest index along each axis (field) in
+        the array.
         """
         return tuple(np.min(indices[field]) for field in indices.dtype.fields)
 
+    def get_max(self, shift: int = 0) -> Tuple[int]:
+        """Get the maximum along each field."""
+        return tuple(np.max(self.indices[field]) + shift
+                     for field in self.indices.dtype.fields)
+
     def update_origin(self):
         """Find and update the `origin` from the current stored indices."""
+        if self.is_shifted:
+            raise ValueError('Cannot update origin of already shifted indices')
         self.origin = IndexedMask.get_origin(self.indices)
 
     def shift_to_origin(self):
         """Shift indices so origin is zero."""
-        # Update origin just in case someone forgot to do
+        if self.is_shifted:
+            raise ValueError('Indices already shifted')
+
+        # Update origin just in case someone forgot to do it
         self.update_origin()
         for i, field in enumerate(self.indices.dtype.fields):
             self.indices[field] = self.indices[field] - self.origin[i]
 
+        # Update status
+        self.is_shifted = True
+
     def shift_back(self):
         """Shift indices so origin is the origin back to original mask."""
+        # Check shift status
+        if not is_shifted:
+            raise ValueError('Cannot shift back unshifted indices')
+
+        # Shift indices
         for i, field in enumerate(self.indices.dtype.fields):
             self.indices[field] = self.indices[field] + self.origin[i]
+
+        # Update status
+        self.is_shifted = False
 
     def update_to(self, mask: npt.ArrayLike,
                   shift_back: bool = False) -> None:
@@ -104,22 +128,32 @@ class IndexedMask:
         # Replace indices
         self.indices = IndexedMask.indices_from_array(mask)
 
+        # Shift indices
         if shift_back:
             self.shift_back()
 
+        # Update origin if needed
+        if not self.is_shifted:
+            self.update_origin()
+
     def merge_with(self, mask: 'IndexedMask') -> None:
         """Union of 2 masks."""
+        # Check shift status
+        if self.is_shifted:
+            raise ValueError('Cannot merge shifted indices')
+        elif mask.is_shifted:
+            raise ValueError('Cannot merge with shifted input mask')
+        if self.shape != mask.shape:
+            raise ValueError(('Masks with different shape: '
+                              f'{self.shape} {mask.shape}'))
+
+        # Update indices
         indices = np.concatenate((self.indices, mask.indices))
         self.indices = np.array(list(set(map(tuple, indices))),
                                 dtype=self.indices.dtype)
 
         # Update origin
         self.update_origin()
-
-    def get_max(self, shift: int = 0) -> Tuple[int]:
-        """Get the maximum along each field."""
-        return tuple(np.max(self.indices[field]) + shift
-                     for field in self.indices.dtype.fields)
 
     def minimal_mask(self, shift_to_origin: bool = False) -> npt.ArrayLike:
         """Return a mask with the minimum shape containg all valid point."""
@@ -137,6 +171,11 @@ class IndexedMask:
 
     def to_array(self) -> npt.ArrayLike:
         """Build a mask array."""
+        # Check shift status
+        if self.is_shifted:
+            raise ValueError('Cannot create array from shifted indices')
+
+        # Create array
         mask = np.zeros(self.shape, dtype=bool)
         mask[tuple(np.array(list(map(list, self.indices))).T)] = True
 
