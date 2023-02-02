@@ -38,8 +38,9 @@ class IndexedMask:
         indices = cls.indices_from_array(mask)
 
         # Find origin and shift
-        origin = tuple(np.min(indices[field])
-                       for field in indices.dtype.fields)
+        origin = cls.get_origin(indices)
+        #origin = tuple(np.min(indices[field])
+        #               for field in indices.dtype.fields)
         #origins = tuple()
         #for field in indices.dtype.fields:
         #    origin = np.min(indices[field])
@@ -67,9 +68,40 @@ class IndexedMask:
 
         return indices
 
+    @staticmethod
+    def get_origin(indices: npt.ArrayLike) -> Tuple[int]:
+        """Get the origin of structured array of indices.
+
+        The origin is defined as the lowest indices in the array.
+        """
+        return tuple(np.min(indices[field]) for field in indices.dtype.fields)
+
+    def update_origin(self):
+        """Find and update the `origin` from the current stored indices."""
+        self.origin = IndexedMask.get_origin(self.indices)
+
+    def shift_to_origin(self):
+        """Shift indices so origin is zero."""
+        # Update origin just in case someone forgot to do
+        self.update_origin()
+        for i, field in enumerate(self.indices.dtype.fields):
+            self.indices[field] = self.indices[field] - self.origin[i]
+
+    def shift_back(self):
+        """Shift indices so origin is the origin back to original mask."""
+        for i, field in enumerate(self.indices.dtype.fields):
+            self.indices[field] = self.indices[field] + self.origin[i]
+
     def update_to(self, mask: npt.ArrayLike,
                   shift_back: bool = False) -> None:
-        """Replace the indices using input mask."""
+        """Replace the indices using input mask.
+        
+        If `shift_back` is `True` then the indices derived from `mask` are
+        shifted using the stored `origin`, i.e. it assumes the input mask has
+        the same origin as the stored indices and that these were shifted so
+        origin is zero. 
+        """
+        # Replace indices
         self.indices = IndexedMask.indices_from_array(mask)
 
         if shift_back:
@@ -81,15 +113,8 @@ class IndexedMask:
         self.indices = np.array(list(set(map(tuple, indices))),
                                 dtype=self.indices.dtype)
 
-    def shift_to_origin(self):
-        """Shift indices so origin is zero."""
-        for i, field in enumerate(self.indices.dtype.fields):
-            self.indices[field] = self.indices[field] - self.origin[i]
-
-    def shift_back(self):
-        """Shift indices so origin is the origin back to original mask."""
-        for i, field in enumerate(self.indices.dtype.fields):
-            self.indices[field] = self.indices[field] + self.origin[i]
+        # Update origin
+        self.update_origin()
 
     def get_max(self, shift: int = 0) -> Tuple[int]:
         """Get the maximum along each field."""
