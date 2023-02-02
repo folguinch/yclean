@@ -106,7 +106,7 @@ class IndexedMask:
     def shift_back(self):
         """Shift indices so origin is the origin back to original mask."""
         # Check shift status
-        if not is_shifted:
+        if not self.is_shifted:
             raise ValueError('Cannot shift back unshifted indices')
 
         # Shift indices
