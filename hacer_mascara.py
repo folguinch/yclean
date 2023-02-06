@@ -100,6 +100,11 @@ class IndexedMask:
         for i, field in enumerate(self.indices.dtype.fields):
             self.indices[field] = self.indices[field] - self.origin[i]
 
+            # Double check
+            if np.any(self.indices[field] < 0):
+                raise IndexError(f'Negative indices after shift {field} to '
+                                 f'{self.origin[i]}')
+
         # Update status
         self.is_shifted = True
 
