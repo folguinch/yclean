@@ -1,5 +1,5 @@
 """Common utilities."""
-from typing import Callable, Sequence, Tuple, Optional, Dict, List
+from typing import Callable, Sequence, Optional, Dict, List
 from datetime import datetime
 from pathlib import Path
 import itertools

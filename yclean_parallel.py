@@ -122,7 +122,7 @@ def plot_yclean_step(cube_spec: u.Quantity,
         thresh = u.Quantity(threshold) / u.beam
         thresh = thresh.to(unit)
         ax.axhline(thresh.value, ls='-', c='c', label='threshold', zorder=3)
-    
+
     # Mask level comes as quantity
     if masklevel is not None:
         ax.axhline(masklevel.to(unit).value, ls='-', c='m', label='masklevel',
@@ -176,11 +176,11 @@ def resume_from_stats(stats_file: Path,
       iter_limits: optional; maximum number of iterations.
     """
     # Load stats
-    stats = np.loadtxt(stats_file, usecols=(0, 1, 2, 11), ndmin=2)
-    it = stats[:,0].astype(int)
-    rms = stats[:,1]
-    residual_max = stats[:,2]
-    peak_corrected = stats[:,3]
+    yclean_stats = np.loadtxt(stats_file, usecols=(0, 1, 2, 11), ndmin=2)
+    it = yclean_stats[:,0].astype(int)
+    rms = yclean_stats[:,1]
+    residual_max = yclean_stats[:,2]
+    peak_corrected = yclean_stats[:,3]
 
     # Determine step
     if ((it[-1] != 0 and residual_max[-1] > residual_max[-2]) or
@@ -197,10 +197,10 @@ def resume_from_stats(stats_file: Path,
         if it[-1] == 0:
             cumulative_mask = None
         else:
-            cumulative_mask = mask_dir / f'{imagename.name}.tc{it[-1]-1}.mask'
+            cumulative_mask = mask_dir / f'{file_root}.tc{it[-1]-1}.mask'
             cumulative_mask = open_mask(cumulative_mask)
 
-        return (rms[-1], residual_max[-1], it_max, cumulative_mask,
+        return (rms[-1], residual_max[-1], it[-1], cumulative_mask,
                 peak_corrected[-1], False)
 
 def yclean(vis: Path,
@@ -301,16 +301,16 @@ def yclean(vis: Path,
     stats_file = imagename.parent / 'statistics.dat'
     if stats_file.is_file() and resume:
         log('Resuming from stats file')
-        stats = resume_from_stats(stats_file, mask_dir, imagename.name,
+        run_stats = resume_from_stats(stats_file, mask_dir, imagename.name,
                                   iter_limit=iter_limit)
-        rms = stats[0] * cube.unit
-        peak_corrected = stats[4]
-        old_residual_max = stats[1] * cube.unit
-        residual_max = 0.8**peak_corrected * stats[1] * cube.unit
+        rms = run_stats[0] * cube.unit
+        peak_corrected = run_stats[4]
+        old_residual_max = run_stats[1] * cube.unit
+        residual_max = 0.8**peak_corrected * run_stats[1] * cube.unit
         limit_level_snr = residual_max / rms * secondary_lobe_level
-        it = int(stats[2])
-        cumulative_mask = stats[3]
-        break_flag = stats[5]
+        it = int(run_stats[2])
+        cumulative_mask = run_stats[3]
+        break_flag = run_stats[5]
     else:
         # RMS calculated in a subset of channels
         rms, residual_max, residual_max_pos, limit_level_snr = get_stats(
@@ -430,11 +430,14 @@ def yclean(vis: Path,
                'residual_max_pos': residual_max_pos, 'threshold': threshold,
                'mask_level': masklevel}
         sti.update(mask_stats)
-        
+
         # Apply peak correction
         tol = peak_tol * rms
-        if (residual_max >= 0.8**peak_corrected * old_residual_max - tol and
-            residual_max <= 0.8**peak_corrected * old_residual_max + tol):
+        upper_lim = 0.8**peak_corrected * old_residual_max + tol
+        lower_lim = 0.8**peak_corrected * old_residual_max - tol
+        #if (residual_max >= 0.8**peak_corrected * old_residual_max - tol and
+        #    residual_max <= 0.8**peak_corrected * old_residual_max + tol):
+        if lower_lim <= residual_max <= upper_lim:
             peak_corrected += 1
             residual_max = 0.8**peak_corrected * residual_max
             limit_level_snr = 0.8**peak_corrected * limit_level_snr
@@ -577,7 +580,7 @@ def yclean(vis: Path,
 
     # Crop image? Shouldn't be used with cubes that will be joined
     if pb_crop_level is not None:
-        log(f'Cropping image down to pb level: {pb_crop}')
+        log(f'Cropping image down to pb level: {pb_crop_level}')
         load = ('image',)
         if pbcor:
             load += ('image.pbcor',)
