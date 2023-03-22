@@ -529,8 +529,8 @@ def yclean(vis: Path,
                         'calcpsf': False,
                         'calcres': False,
                         'pbcor': pbcor,
-                        'mask': str(new_mask_name),
-                        'pblimit': 0.1})
+                        'mask': str(new_mask_name)})
+                        #'pblimit': 0.1})
     tclean_parallel(vis, Path(f'{imagename}.tc0'), nproc, tclean_args)
 
     # Export FITS
