@@ -1,0 +1,35 @@
+[tool.poetry]
+name = "yclean"
+version = "2.2.1"
+description = "Auto-masking molecular line cube CLEANing"
+authors = [
+    "Yanett Contreras",
+    "Patricio Sanhueza",
+    "Fernando Olguin <f.olguin.ch@gmail.com>"
+]
+maintainers = ["Fernando Olguin <f.olguin.ch@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+#homepage = ""
+#documentation = ""
+
+[tool.poetry.dependencies]
+python = ">=3.8,<3.12"
+astropy = "^5.2.1"
+casatasks = "^6.5.3.28"
+casatools = "^6.5.3.28"
+spectral-cube = "^0.6.0"
+dask = "^2023.3.1"
+numpy = "^1.24.2"
+scipy = "^1.10.1"
+psutil = { version = "^5.9.4", optional = true }
+
+[tool.poetry.extras]
+sysinfo = ["psutil"]
+
+[tool.poetry.scripts]
+run_yclean = 'yclean.run_yclean:yclean'
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
