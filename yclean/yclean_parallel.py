@@ -215,7 +215,7 @@ def yclean(vis: Path,
            pbcor: bool = False,
            pb_crop_level: Optional[float] = None,
            spectrum_at: Optional[Tuple[int]] = None,
-           log: Callable = casalog.post,
+           log: Callable = print,
            **tclean_args) -> Tuple[Path]:
     """Automatic CLEANing.
 
@@ -265,7 +265,8 @@ def yclean(vis: Path,
     if not work_img.is_dir():
         log('Calculating dirty image')
         work_img.parent.mkdir(exist_ok=True)
-        tclean_parallel(vis, Path(f'{imagename}.tc0'), nproc, tclean_args)
+        tclean_parallel(vis, Path(f'{imagename}.tc0'), nproc, tclean_args,
+                        log=log)
         #tclean(vis=vis, imagename=f'{imagename}.tc0', **tclean_args)
     else:
         log('Dirty found ... skipping initial tclean')
@@ -407,7 +408,8 @@ def yclean(vis: Path,
                             'calcpsf': False,
                             'calcres': False,
                             'mask': str(new_mask_name)})
-        tclean_parallel(vis, Path(f'{imagename}.tc0'), nproc, tclean_args)
+        tclean_parallel(vis, Path(f'{imagename}.tc0'), nproc, tclean_args,
+                        log=log)
 
         # Load new images
         if full:
@@ -534,7 +536,7 @@ def yclean(vis: Path,
                         'pbcor': pbcor,
                         'mask': str(new_mask_name)})
                         #'pblimit': 0.1})
-    tclean_parallel(vis, Path(f'{imagename}.tc0'), nproc, tclean_args)
+    tclean_parallel(vis, Path(f'{imagename}.tc0'), nproc, tclean_args, log=log)
 
     # Export FITS
     export_to = Path(f'{imagename}.tc_final.image')

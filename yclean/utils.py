@@ -67,7 +67,7 @@ def tclean_parallel(vis: Path,
                     imagename: Path,
                     nproc: int,
                     tclean_args: dict,
-                    log: Callable = casalog.post):
+                    log: Callable = print):
     """Run `tclean` in parallel.
 
     If the number of processes (`nproc`) is 1, then it is run in a single
