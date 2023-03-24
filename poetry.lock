@@ -82,6 +82,17 @@ docs = ["numpydoc", "sphinx-automodapi"]
 test = ["pytest", "pytest-cov", "pytest-openfiles"]
 
 [[package]]
+name = "casadata"
+version = "2023.1.23"
+description = "casa data repository"
+category = "main"
+optional = false
+python-versions = "*"
+files = [
+    {file = "casadata-2023.1.23-py3-none-any.whl", hash = "sha256:4f4a81ec5d2afb1c615de49d3f4a45b2baeea9576d6c55b218d4d133f9767149"},
+]
+
+[[package]]
 name = "casatasks"
 version = "6.5.3.28"
 description = "the CASA tasks"
@@ -343,6 +354,27 @@ sftp = ["paramiko"]
 smb = ["smbprotocol"]
 ssh = ["paramiko"]
 tqdm = ["tqdm"]
+
+[[package]]
+name = "goco-helpers"
+version = "0.1.0"
+description = "Package grouping helper functions for goco"
+category = "main"
+optional = false
+python-versions = ">=3.8,<3.12"
+files = []
+develop = false
+
+[package.dependencies]
+astropy = "^5.2.1"
+casatasks = "^6.5.3.28"
+casatools = "^6.5.3.28"
+numpy = "^1.24.2"
+spectral-cube = "^0.6.0"
+
+[package.source]
+type = "directory"
+url = "../goco-helpers"
 
 [[package]]
 name = "importlib-resources"
@@ -987,4 +1019,4 @@ sysinfo = ["psutil"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.8,<3.12"
-content-hash = "c5465ec2602ef53c5742d809e1cefaaaf6cbfa6e700924bae38841b445e99c33"
+content-hash = "e981d9eaf9ea00f7e7de3a3c28427c6f6f26a8bfa8f96e51ef98046de2ba6da1"
