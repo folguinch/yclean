@@ -1,5 +1,5 @@
 """Tasks for creating and writing masks."""
-from typing import Optional, TypeVar, Callable, Tuple
+from typing import Optional, Callable, Tuple
 from pathlib import Path
 
 from astropy.io import fits
@@ -7,7 +7,6 @@ from casatasks import casalog, importfits
 from spectral_cube import SpectralCube
 import astropy.units as u
 import dask
-import dask.array as da
 import numpy as np
 import numpy.typing as npt
 import scipy.ndimage as ndimg
@@ -380,7 +379,7 @@ def make_threshold_mask(cube: SpectralCube,
     stats['mask_final'] = mask.size
     log(f"Final number of valid data: {stats['mask_final']}")
     log(f'Final mask origin: {mask.origin}')
-    
+
     # Write mask
     log('Writing mask')
     write_mask(mask_array, cube, output_mask)
