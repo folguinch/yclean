@@ -1,5 +1,5 @@
 """Join cubes produced by yclean."""
-from typing import Sequence, Optional
+from typing import Sequence, Optional, Callable
 from pathlib import Path
 import argparse
 import sys
