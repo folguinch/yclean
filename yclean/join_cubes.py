@@ -1,13 +1,15 @@
 """Join cubes produced by yclean."""
 from typing import Sequence, Optional, Callable
+from datetime import datetime
 from pathlib import Path
 import argparse
 import sys
 import os
 
-from casatasks import exportfits
+from casatasks import exportfits, imsubimage
 from casatools import image
 from goco_helpers import argparse_actions as actions
+from goco_helpers import argparse_parents as parents
 from spectral_cube import SpectralCube
 import matplotlib.pyplot as plt
 import numpy as np
@@ -23,12 +25,17 @@ def crop_spectral_axis(img: image,
       outfile: output image file.
     """
     # Identify spectral axis
-    summ = img.summary()
-    ind = np.where(summ['axisnames'] == 'Frequency')[0][0]
+    #summ = img.summary()
+    #ind = np.where(summ['axisnames'] == 'Frequency')[0][0]
 
     # Crop image
-    aux = img.crop(outfile=str(outfile), axes=ind, chans=chans)
-    aux.close()
+    #aux = img.crop(outfile=str(outfile), chans=chans)
+    #aux.close()
+    #cube = SpectralCube.read(img, use_dask=True)
+    #start, stop = tuple(map(int, chans.split('~')))
+    #subcube = cube[start:stop,:,:]
+    #subcube.write(outfile)
+    imsubimage(imagename=str(img), outfile=str(outfile), chans=chans)
 
 def join_cubes(inputs: Sequence[Path],
                output: Path,
@@ -69,13 +76,13 @@ def join_cubes(inputs: Sequence[Path],
             if chans is None:
                 img_name = inp.expanduser()
             else:
-                img = image()
-                img = img.open(str(inp.expanduser()))
+                #img = image()
+                #img.open(str(inp.expanduser()))
                 img_name = Path(f'temp{i}.image')
                 if img_name.is_dir():
                     os.system('rm -rf temp*.image')
-                crop_spectral_axis(img, chans, img_name)
-                img.close()
+                crop_spectral_axis(inp.expanduser(), chans, img_name)
+                #img.close()
                 has_temps = True
 
             # Store filenames
@@ -83,8 +90,8 @@ def join_cubes(inputs: Sequence[Path],
         filelist = ' '.join(filelist)
 
         # Concatenate
-        img.imageconcat(outfile=str(imagename), infiles=filelist)
-        img.close()
+        image.imageconcat(outfile=str(imagename), infiles=filelist)
+        image.close()
 
     # Export fits
     if export_fits:
@@ -104,7 +111,7 @@ def join_cubes(inputs: Sequence[Path],
 
     return imagename
 
-def _join_cubes(args: NameSpace) -> None:
+def _join_cubes(args: argparse.Namespace) -> None:
     """Join the cubes."""
     # Check if step is needed
     if args.chanranges is None:
@@ -115,11 +122,11 @@ def _join_cubes(args: NameSpace) -> None:
         raise ValueError('Number of input cubes and chanranges do not match')
 
     # Join the cubes
-    args.finalcube = join_cubes(args.cubes, args.outputcube,
+    args.finalcube = join_cubes(args.cubes, args.outputcube[0],
                                 channels=args.chanranges, export_fits=True,
                                 log=args.log.info)
 
-def _plot_spec(args: NameSpace) -> None:
+def _plot_spec(args: argparse.Namespace) -> None:
     if args.spec_at is None:
         return
     spec_at = args.spec_at
@@ -141,7 +148,7 @@ def _plot_spec(args: NameSpace) -> None:
     ax.plot(cube_spec, 'k-', ds='steps-mid', zorder=1)
     fig.savefig(args.finalcube.with_suffix('.png'), bbox_inches='tight')
 
-def _postproc(args: NameSpace) -> None:
+def _postproc(args: argparse.Namespace) -> None:
     # Should the final cube be postprocessed?
     if args.common_beam or args.minimal:
         cube = SpectralCube.read(args.finalcube)
@@ -185,9 +192,9 @@ def join_cubes_cmd(args: Optional[Sequence] = None) -> None:
     parser.add_argument('--spec_at', metavar=('XPOS', 'YPOS'), type=int,
                         nargs=2, default=None,
                         help='Plot steps at this pixel position')
-    parser.add_argument('--chanranges', args='*',
+    parser.add_argument('--chanranges', nargs='*',
                         help='Channel ranges to crop the cubes')
-    parser.add_argument('outputcube', nargs='1', type=str,
+    parser.add_argument('outputcube', nargs=1, type=str,
                         action=actions.NormalizePath,
                         help='Output cube path')
     parser.add_argument('cubes', nargs='*', type=str,
@@ -204,4 +211,4 @@ def join_cubes_cmd(args: Optional[Sequence] = None) -> None:
         step(args)
 
 if __name__ == '__main__':
-    join_cubes_main(sys.argv[1:])
+    join_cubes_cmd(sys.argv[1:])
