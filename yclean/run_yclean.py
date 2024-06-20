@@ -16,6 +16,7 @@ from goco_helpers import utils
 import numpy as np
 
 from yclean.yclean_parallel import yclean
+from yclean.join_cubes import join_cubes
 
 # Types
 Config = TypeVar('Config')
@@ -230,82 +231,6 @@ def get_windows(vis: Path, cfg: Config, log: Callable = print) -> List:
 
     return windows
 
-def crop_spectral_axis(img: image,
-                       chans: str,
-                       outfile: Path):
-    """Crop image along the spectral axis.
-
-    Args:
-      img: CASA image object.
-      chans: channel range.
-      outfile: output image file.
-    """
-    # Identify spectral axis
-    summ = img.summary()
-    ind = np.where(summ['axisnames'] == 'Frequency')[0][0]
-
-    # Crop image
-    aux = img.crop(outfile=str(outfile), axes=ind, chans=chans)
-    aux.close()
-
-def join_cubes(inputs: Sequence[Path],
-               output: Path,
-               channels: Sequence[str],
-               resume: bool = False,
-               log: Callable = print) -> None:
-    """Join cubes at specific channels.
-
-    Args:
-      inputs: input cubes to join.
-      output: file name.
-      channels: channel ranges for spectral cropping.
-      resume: optional; resume calculations?
-      log: optional; logging function.
-    """
-    # Check
-    if len(channels) != len(inputs):
-        raise ValueError('Different length of input and channels')
-
-    # Concatenated image
-    imagename = output.expanduser()
-
-    # Join
-    if resume and imagename.is_dir():
-        log(f'Skipping concatenated image: {imagename}')
-    else:
-        if imagename.is_dir():
-            os.system(f'rm -rf {imagename}')
-        # Crop images
-        filelist = []
-        for i, (chans, inp) in enumerate(zip(channels, inputs)):
-            img = image()
-            img = img.open(str(inp.expanduser()))
-            img_name = Path(f'temp{i}.image')
-            if img_name.is_dir():
-                os.system('rm -rf temp*.image')
-            crop_spectral_axis(img, chans, img_name)
-            img.close()
-
-            # Store filenames
-            filelist.append(str(img_name))
-        filelist = ' '.join(filelist)
-
-        # Concatenate
-        img.imageconcat(outfile=str(imagename), infiles=filelist)
-        img.close()
-
-    # Export fits
-    imagefits = imagename.with_suffix('.image.fits')
-    if resume and imagefits.exists():
-        log('Skipping FITS export')
-    else:
-        exportfits(imagename=str(imagename), fitsimage=str(imagefits),
-                   overwrite=True)
-
-    # Clean up
-    log('Cleaning up')
-    os.system('rm -rf temp*.image')
-
 def _check_env(args: NameSpace) -> None:
     """Check directories configuration."""
     # Main directory
@@ -431,7 +356,7 @@ def _join_cubes(args: NameSpace) -> None:
         else:
             args.log.info(f'Joining cubes: {val}')
             join_cubes(val, output,
-                       split_option(args.config, 'joinchans'),
+                       channels=split_option(args.config, 'joinchans'),
                        resume=args.resume, log=args.log.info)
 
 def run_yclean(args: Optional[List] = None) -> None:
