@@ -1,5 +1,5 @@
 """Join cubes produced by yclean."""
-from typing import Sequence, Optional
+from typing import Sequence, Optional, Callable
 from pathlib import Path
 import argparse
 import sys
@@ -104,7 +104,7 @@ def join_cubes(inputs: Sequence[Path],
 
     return imagename
 
-def _join_cubes(args: NameSpace) -> None:
+def _join_cubes(args: argparse.Namespace) -> None:
     """Join the cubes."""
     # Check if step is needed
     if args.chanranges is None:
@@ -119,7 +119,7 @@ def _join_cubes(args: NameSpace) -> None:
                                 channels=args.chanranges, export_fits=True,
                                 log=args.log.info)
 
-def _plot_spec(args: NameSpace) -> None:
+def _plot_spec(args: argparse.Namespace) -> None:
     if args.spec_at is None:
         return
     spec_at = args.spec_at
@@ -141,7 +141,7 @@ def _plot_spec(args: NameSpace) -> None:
     ax.plot(cube_spec, 'k-', ds='steps-mid', zorder=1)
     fig.savefig(args.finalcube.with_suffix('.png'), bbox_inches='tight')
 
-def _postproc(args: NameSpace) -> None:
+def _postproc(args: argparse.Namespace) -> None:
     # Should the final cube be postprocessed?
     if args.common_beam or args.minimal:
         cube = SpectralCube.read(args.finalcube)
