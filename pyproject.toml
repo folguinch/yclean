@@ -14,18 +14,18 @@ readme = "README.md"
 #documentation = ""
 
 [tool.poetry.dependencies]
-python = ">=3.8,<3.12"
-astropy = "^5.2.1"
-casatasks = "^6.5.3.28"
-casatools = "^6.5.3.28"
-spectral-cube = "^0.6.0"
-dask = "^2023.3.1"
-numpy = "^1.24.2"
+python = ">=3.9,<4.0"
+astropy = "^6.0.0"
+casatasks = "6.6.3.22"
+casatools = "6.6.3.22"
+spectral-cube = "^0.6.5"
+dask = "2024.2.1"
+#numpy = "1.26.4"
 scipy = "^1.10.1"
 psutil = { version = "^5.9.4", optional = true }
 #goco_helpers = { path = "../goco-helpers/" }
 goco_helpers = { git = "https://github.com/folguinch/goco-helpers.git" }
-casadata = "^2023.1.23"
+casadata = "2023.9.18"
 
 [tool.poetry.extras]
 sysinfo = ["psutil"]
