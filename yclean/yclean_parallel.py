@@ -46,9 +46,9 @@ def get_stats(cube: SpectralCube,
       Limit level SNR.
     """
     # Channel sample
-    planes = np.arange(*planes, dtype=float)
-    planes = np.floor(planes / 10 * cube.shape[0]).astype(int)
     valid_cube = cube.subcube_from_mask(pbmask)
+    planes = np.arange(*planes, dtype=float)
+    planes = np.floor(planes / 10 * valid_cube.shape[0]).astype(int)
     rms = stats.mad_std(valid_cube.unmasked_data[planes,:,:], ignore_nan=True)
     log(f'Image rms: {rms.value:.3e} {rms.unit}')
 
