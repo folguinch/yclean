@@ -1,5 +1,6 @@
 """Program to run YCLEAN."""
-from typing import Any, Callable, List, Optional, Sequence, TypeVar, Dict
+from typing import (Any, Callable, List, Optional, Sequence, TypeVar, Dict,
+                    Mapping)
 from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path
@@ -109,8 +110,10 @@ def fill_window(chanranges: Sequence[str], **kwargs) -> List[Dict[str, Any]]:
             if len(chanranges) > 1:
                 info['name'] = info['name'] + f'_{i+1}'
         except ValueError:
-            info['start'] = ''
-            info['nchan'] = -1
+            info['start'] = kwargs.get('start', '')
+            info['nchan'] = kwargs.get('nchan', -1)
+            if info['nchan'] == '':
+                info['nchan'] = -1
 
         window.append(info)
 
@@ -188,7 +191,8 @@ def match_length(cfg: Config,
 
     return vals
 
-def get_windows(vis: Path, cfg: Config, log: Callable = print) -> List:
+def get_windows(vis: Path, cfg: Config,
+                log: Callable = print) -> List:
     """Define parameters for each spw.
 
     Args:
@@ -204,14 +208,16 @@ def get_windows(vis: Path, cfg: Config, log: Callable = print) -> List:
     freqs = match_length(cfg, 'restfreqs', spws, log=log)
     bnames = match_length(cfg, 'names', spws, fillerfn=fill_names, log=log)
     widths = match_length(cfg, 'widths', spws, log=log)
+    starts = match_length(cfg, 'starts', spws, log=log)
+    nchans = match_length(cfg, 'nchans', spws, log=log)
 
     # Spectral window real values after concat
     spws_val = utils.get_spws_indices(vis, spws=spws, log=log)
 
     # Iterate over spectral windows
     windows = []
-    info0 = ['spw', 'spw_val', 'freq', 'name', 'width']
-    for info in zip(spws, spws_val, freqs, bnames, widths):
+    info0 = ['spw', 'spw_val', 'freq', 'name', 'width', 'start', 'nchan']
+    for info in zip(spws, spws_val, freqs, bnames, widths, starts):
         # Get channel ranges
         spw = info[0]
         if f'chanrange{spw}' in cfg:
@@ -264,7 +270,8 @@ def _run_yclean(args: NameSpace) -> None:
     vis = Path(args.uvdata[0])
 
     # Spectral setup per channel window
-    wins = get_windows(vis, args.config, log=args.log.info)
+    wins = get_windows(vis, args.config, tclean_params=args.tclean_params,
+                       log=args.log.info)
 
     # Compute common beam?
     if 'joinchans' not in args.config:
@@ -282,11 +289,11 @@ def _run_yclean(args: NameSpace) -> None:
         args.log.info(f'Procesing {name}')
 
         # Some clean values
-        restfreq = win['freq']
-        width = win['width']
-        start = win['start']
-        nchan = int(win['nchan'])
-        spw = win['spw_val']
+        win_params = {'restfreq': win['freq'],
+                      'width': win['width'],
+                      'start': win['start'],
+                      'nchan': int(win['nchan']),
+                      'spw': win['spw_val']}
         imagename = directory / f'auto{source}_{name}'
 
         # Log
@@ -304,10 +311,8 @@ def _run_yclean(args: NameSpace) -> None:
         finalimage, _ = yclean(vis, imagename, nproc=args.nproc[0],
                                common_beam=common_beam, resume=resume,
                                full=args.full, log=args.log.info,
-                               restfreq=restfreq, width=width,
-                               start=start, nchan=nchan,
                                spectrum_at=args.spec_at,
-                               spw=spw, **args.tclean_params)
+                               **(args.tclean_params | win_params))
 
         # Store split filenames
         basename = win['basename']
