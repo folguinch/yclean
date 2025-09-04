@@ -217,7 +217,7 @@ def get_windows(vis: Path, cfg: Config,
     # Iterate over spectral windows
     windows = []
     info0 = ['spw', 'spw_val', 'freq', 'name', 'width', 'start', 'nchan']
-    for info in zip(spws, spws_val, freqs, bnames, widths, starts):
+    for info in zip(spws, spws_val, freqs, bnames, widths, starts, nchans):
         # Get channel ranges
         spw = info[0]
         if f'chanrange{spw}' in cfg:
@@ -270,8 +270,7 @@ def _run_yclean(args: NameSpace) -> None:
     vis = Path(args.uvdata[0])
 
     # Spectral setup per channel window
-    wins = get_windows(vis, args.config, tclean_params=args.tclean_params,
-                       log=args.log.info)
+    wins = get_windows(vis, args.config, log=args.log.info)
 
     # Compute common beam?
     if 'joinchans' not in args.config:
